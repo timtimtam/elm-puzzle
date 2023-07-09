@@ -36,41 +36,34 @@ app =
                     ( WindowResized w h, _ ) ->
                         ( { model | width = w, height = h }, Cmd.none )
 
-                    ( MouseMoved x y, Down ) ->
-                        if model.mouseButtonState == Down then
-                            let
-                                cameraLeft =
-                                    Math.Vector3.cross model.cameraUp model.cameraAngle
+                    ( MouseMoved x y, _ ) ->
+                        let
+                            cameraLeft =
+                                Math.Vector3.cross model.cameraUp model.cameraAngle
 
-                                newAngle =
-                                    Math.Vector3.normalize
-                                        (model.cameraAngle
-                                            |> Math.Matrix4.transform
-                                                (Math.Matrix4.mul
-                                                    (Math.Matrix4.makeRotate
-                                                        (-8 * x / model.width)
-                                                        model.cameraUp
-                                                    )
-                                                    (Math.Matrix4.makeRotate
-                                                        (-8 * y / model.height)
-                                                        cameraLeft
-                                                    )
+                            newAngle =
+                                Math.Vector3.normalize
+                                    (model.cameraAngle
+                                        |> Math.Matrix4.transform
+                                            (Math.Matrix4.mul
+                                                (Math.Matrix4.makeRotate
+                                                    (-8 * x / model.width)
+                                                    model.cameraUp
                                                 )
-                                        )
+                                                (Math.Matrix4.makeRotate
+                                                    (-8 * y / model.height)
+                                                    cameraLeft
+                                                )
+                                            )
+                                    )
 
-                                newUp =
-                                    Math.Vector3.normalize
-                                        (Math.Vector3.negate
-                                            (Math.Vector3.cross cameraLeft newAngle)
-                                        )
-                            in
-                            ( { model | cameraAngle = newAngle, cameraUp = newUp }, Cmd.none )
-
-                        else
-                            ( model, Cmd.none )
-
-                    ( MouseMoved _ _, _ ) ->
-                        ( model, Cmd.none )
+                            newUp =
+                                Math.Vector3.normalize
+                                    (Math.Vector3.negate
+                                        (Math.Vector3.cross cameraLeft newAngle)
+                                    )
+                        in
+                        ( { model | cameraAngle = newAngle, cameraUp = newUp }, Cmd.none )
 
                     ( MouseDown, _ ) ->
                         ( { model | mouseButtonState = Down }, Cmd.none )
