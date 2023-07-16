@@ -17,7 +17,8 @@ import Math.Vector3 exposing (Vec3, vec3)
 import Task
 import Types exposing (..)
 import Url
-import WebGL
+import WebGL exposing (antialias, clearColor)
+import WebGL.Settings exposing (FaceMode, back, cullFace)
 import WebGL.Texture as Texture exposing (Texture)
 
 
@@ -36,7 +37,7 @@ app =
                     ( WindowResized w h, _ ) ->
                         ( { model | width = w, height = h }, Cmd.none )
 
-                    ( MouseMoved x y, _ ) ->
+                    ( MouseMoved x y, Down ) ->
                         let
                             cameraLeft =
                                 Math.Vector3.cross model.cameraUp model.cameraAngle
@@ -64,6 +65,9 @@ app =
                                     )
                         in
                         ( { model | cameraAngle = newAngle, cameraUp = newUp }, Cmd.none )
+
+                    ( MouseMoved _ _, _ ) ->
+                        ( model, Cmd.none )
 
                     ( MouseDown, _ ) ->
                         ( { model | mouseButtonState = Down }, Cmd.none )
@@ -119,16 +123,17 @@ init _ key =
 view { width, height, cameraAngle, cameraDistance, cameraUp } =
     { title = "Hello"
     , body =
-        [ WebGL.toHtml
+        [ WebGL.toHtmlWith
+            [ antialias, clearColor 0.2 0.2 0.3 1 ]
             [ Attr.width (round width)
             , Attr.height (round height)
             , Attr.style "display" "block"
             , Attr.style "background-color" "#292C34"
             ]
-            [ WebGL.entity
+            [ WebGL.entityWith [ cullFace back ]
                 vertexShader
                 fragmentShader
-                crate
+                manualCrates
                 { perspective = perspective (width / height) cameraAngle cameraDistance cameraUp }
             ]
         ]
@@ -140,7 +145,7 @@ perspective ratio cameraAngle cameraDistance cameraUp =
         (Math.Matrix4.makePerspective 45 ratio 0.1 100)
         (Math.Matrix4.makeLookAt
             (Math.Vector3.scale cameraDistance (Math.Vector3.normalize cameraAngle))
-            (vec3 0 0 0)
+            (vec3 0.5 0.5 0.5)
             cameraUp
         )
 
@@ -153,6 +158,48 @@ type alias Vertex =
     { position : Vec3
     , color : Vec3
     }
+
+
+manualCrates : WebGL.Mesh Vertex
+manualCrates =
+    WebGL.indexedTriangles
+        [ { position = vec3 0 0 0, color = vec3 0 0 0 }
+        , { position = vec3 1 0 0, color = vec3 1 0 0 }
+        , { position = vec3 1 1 0, color = vec3 1 1 0 }
+        , { position = vec3 0 1 0, color = vec3 0 1 0 }
+        , { position = vec3 0 0 1, color = vec3 0 0 1 }
+        , { position = vec3 1 0 1, color = vec3 1 0 1 }
+        , { position = vec3 1 1 1, color = vec3 1 1 1 }
+        , { position = vec3 0 1 1, color = vec3 0 1 1 }
+        ]
+        [ ( 1, 0, 2 )
+        , ( 2, 0, 3 )
+        , ( 0, 1, 4 )
+        , ( 4, 1, 5 )
+        , ( 1, 2, 5 )
+        , ( 5, 2, 6 )
+        , ( 2, 3, 6 )
+        , ( 6, 3, 7 )
+        , ( 3, 0, 7 )
+        , ( 7, 0, 4 )
+        , ( 4, 5, 7 )
+        , ( 7, 5, 6 )
+        ]
+
+
+
+-- 3D drawing of the vertexes:
+--
+--                7-------6
+--               /|      /|
+--              / |     / |
+--             4--|----5  |
+--             |  3----|--2
+--             | /     | /
+--             |/      |/
+--             0-------1
+--
+-- The triangles are drawn counter-clockwise, 2 triangles per face.
 
 
 crate : WebGL.Mesh Vertex
