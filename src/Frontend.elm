@@ -1,25 +1,39 @@
-module Frontend exposing (..)
+module Frontend exposing (app)
 
 -- import Json.Decode
 
-import Browser exposing (UrlRequest(..))
+import Angle
+import Axis3d
+import Browser
 import Browser.Dom
 import Browser.Events
-import Browser.Navigation as Nav
-import Html exposing (Html)
-import Html.Attributes as Attr
-import Json.Decode exposing (Decoder, field, float, int)
+import Browser.Navigation
+import Camera3d
+import Color
+import Cylinder3d
+import Direction3d
+import Direction3dWire
+import Illuminance
+import Json.Decode
+import Keyboard.Event
+import Keyboard.Key
 import Lamdera
-import Lamdera.Json as Json
-import Math.Matrix4 exposing (Mat4)
-import Math.Vector2 exposing (Vec2, vec2)
-import Math.Vector3 exposing (Vec3, vec3)
+import Length
+import Luminance
+import LuminousFlux
+import Pixels
+import Plane3d
+import Point3d
+import Quantity
+import Scene3d
+import Scene3d.Light
+import Scene3d.Material
+import Sphere3d
 import Task
-import Types exposing (..)
+import Types exposing (ArrowKey(..), ButtonState(..), FrontendModel, FrontendMsg(..))
 import Url
-import WebGL exposing (antialias, clearColor)
-import WebGL.Settings exposing (FaceMode, back, cullFace)
-import WebGL.Texture as Texture exposing (Texture)
+import Vector3d
+import Viewpoint3d
 
 
 type alias Model =
@@ -31,75 +45,19 @@ app =
         { init = init
         , onUrlRequest = \_ -> NoOpFrontendMsg
         , onUrlChange = \_ -> NoOpFrontendMsg
-        , update =
-            \msg model ->
-                case ( msg, model.mouseButtonState ) of
-                    ( WindowResized w h, _ ) ->
-                        ( { model | width = w, height = h }, Cmd.none )
-
-                    ( MouseMoved x y, Down ) ->
-                        let
-                            cameraLeft =
-                                Math.Vector3.cross model.cameraUp model.cameraAngle
-
-                            newAngle =
-                                Math.Vector3.normalize
-                                    (model.cameraAngle
-                                        |> Math.Matrix4.transform
-                                            (Math.Matrix4.mul
-                                                (Math.Matrix4.makeRotate
-                                                    (-8 * x / model.width)
-                                                    model.cameraUp
-                                                )
-                                                (Math.Matrix4.makeRotate
-                                                    (-8 * y / model.height)
-                                                    cameraLeft
-                                                )
-                                            )
-                                    )
-
-                            newUp =
-                                Math.Vector3.normalize
-                                    (Math.Vector3.negate
-                                        (Math.Vector3.cross cameraLeft newAngle)
-                                    )
-                        in
-                        ( { model | cameraAngle = newAngle, cameraUp = newUp }, Cmd.none )
-
-                    ( MouseMoved _ _, _ ) ->
-                        ( model, Cmd.none )
-
-                    ( MouseDown, _ ) ->
-                        ( { model | mouseButtonState = Down }, Cmd.none )
-
-                    ( MouseUp, _ ) ->
-                        ( { model | mouseButtonState = Up }, Cmd.none )
-
-                    ( NoOpFrontendMsg, _ ) ->
-                        ( model, Cmd.none )
+        , update = update
         , updateFromBackend = \_ model -> ( model, Cmd.none )
-        , subscriptions =
-            \_ ->
-                Sub.batch
-                    [ Browser.Events.onResize (\x y -> WindowResized (toFloat x) (toFloat y))
-                    , Browser.Events.onMouseMove
-                        (Json.Decode.map2
-                            MouseMoved
-                            (field "movementX" float)
-                            (field "movementY" float)
-                        )
-                    , Browser.Events.onMouseDown (Json.Decode.succeed MouseDown)
-                    , Browser.Events.onMouseUp (Json.Decode.succeed MouseUp)
-                    ]
+        , subscriptions = subscriptions
         , view = view
         }
 
 
-init _ key =
+init : Url.Url -> Browser.Navigation.Key -> ( Model, Cmd FrontendMsg )
+init _ _ =
     let
         handleResult v =
             case v of
-                Err err ->
+                Err _ ->
                     NoOpFrontendMsg
 
                 Ok vp ->
@@ -107,182 +65,313 @@ init _ key =
     in
     ( { width = 0
       , height = 0
-      , cameraAngle = vec3 1 1 0
-      , cameraDistance = 10
-      , cameraUp = vec3 0 1 0
+      , cameraAngle = Direction3dWire.fromDirection3d Direction3d.positiveY
+      , cameraPosition = ( 2, 2, 2 )
       , mouseButtonState = Up
+      , leftKey = Up
+      , rightKey = Up
+      , upKey = Up
+      , downKey = Up
+      , mousePosition = ( 0, 0 )
+      , lightPosition = ( 3, 3, 3 )
       }
     , Task.attempt handleResult Browser.Dom.getViewport
     )
 
 
+update : FrontendMsg -> Model -> ( Model, Cmd msg )
+update msg model =
+    case ( msg, model.mouseButtonState ) of
+        ( WindowResized w h, _ ) ->
+            ( { model | width = w, height = h }, Cmd.none )
 
--- view : Float -> Html msg
+        ( Tick delta, _ ) ->
+            let
+                scaledDelta =
+                    delta * 0.005
+
+                newCameraPosition =
+                    -- Move the camera based on the arrow keys
+                    let
+                        positionVector =
+                            Vector3d.fromTuple Quantity.float model.cameraPosition
+
+                        cameraAngleXY =
+                            Direction3d.projectOnto Plane3d.xy (Direction3dWire.toDirection3d model.cameraAngle)
+                    in
+                    case cameraAngleXY of
+                        Just angleXY ->
+                            let
+                                cameraLeft =
+                                    Vector3d.normalize
+                                        (Vector3d.cross
+                                            (Direction3d.toVector angleXY)
+                                            (Direction3d.toVector Direction3d.positiveZ)
+                                        )
+
+                                forward =
+                                    Direction3d.toVector angleXY
+                            in
+                            (case ( model.upKey, model.downKey ) of
+                                ( Up, Down ) ->
+                                    Vector3d.multiplyBy -scaledDelta forward
+
+                                ( Down, Up ) ->
+                                    Vector3d.multiplyBy scaledDelta forward
+
+                                _ ->
+                                    Vector3d.zero
+                            )
+                                |> Vector3d.plus
+                                    (case ( model.leftKey, model.rightKey ) of
+                                        ( Up, Down ) ->
+                                            Vector3d.scaleBy -scaledDelta cameraLeft
+
+                                        ( Down, Up ) ->
+                                            Vector3d.scaleBy scaledDelta cameraLeft
+
+                                        _ ->
+                                            Vector3d.zero
+                                    )
+                                |> Vector3d.plus positionVector
+                                |> Vector3d.toTuple Quantity.toFloat
+
+                        Nothing ->
+                            model.cameraPosition
+            in
+            ( { model | cameraPosition = newCameraPosition }, Cmd.none )
+
+        ( MouseMoved x y, Down ) ->
+            let
+                cameraUp =
+                    Direction3d.positiveZ
+
+                cameraAngle =
+                    Direction3dWire.toDirection3d model.cameraAngle
+
+                cameraLeft =
+                    Vector3d.direction
+                        (Vector3d.cross
+                            (Direction3d.toVector cameraUp)
+                            (Direction3d.toVector cameraAngle)
+                        )
+
+                ( newAngle, _ ) =
+                    case cameraLeft of
+                        Just left ->
+                            let
+                                angle =
+                                    cameraAngle
+                                        |> Direction3d.rotateAround
+                                            (Axis3d.through Point3d.origin cameraUp)
+                                            (Angle.radians (-4 * x / model.width))
+                                        |> Direction3d.rotateAround
+                                            (Axis3d.through Point3d.origin left)
+                                            (Angle.radians (-4 * y / model.height))
+                            in
+                            ( angle
+                            , Vector3d.direction
+                                (Vector3d.cross
+                                    (Direction3d.toVector angle)
+                                    (Direction3d.toVector left)
+                                )
+                                |> Maybe.withDefault cameraUp
+                            )
+
+                        Nothing ->
+                            ( cameraAngle, cameraUp )
+            in
+            ( { model
+                | cameraAngle = Direction3dWire.fromDirection3d newAngle
+              }
+            , Cmd.none
+            )
+
+        ( MouseMoved _ _, _ ) ->
+            ( model, Cmd.none )
+
+        ( MouseDown, _ ) ->
+            ( { model | mouseButtonState = Down }, Cmd.none )
+
+        ( MouseUp, _ ) ->
+            ( { model | mouseButtonState = Up }, Cmd.none )
+
+        ( ArrowKeyChanged key state, _ ) ->
+            case key of
+                UpKey ->
+                    ( { model | upKey = state }, Cmd.none )
+
+                DownKey ->
+                    ( { model | downKey = state }, Cmd.none )
+
+                LeftKey ->
+                    ( { model | leftKey = state }, Cmd.none )
+
+                RightKey ->
+                    ( { model | rightKey = state }, Cmd.none )
+
+        ( NoOpFrontendMsg, _ ) ->
+            ( model, Cmd.none )
 
 
-view { width, height, cameraAngle, cameraDistance, cameraUp } =
+view : Model -> Browser.Document FrontendMsg
+view { width, height, cameraAngle, cameraPosition, lightPosition } =
     { title = "Hello"
     , body =
-        [ WebGL.toHtmlWith
-            [ antialias, clearColor 0.2 0.2 0.3 1 ]
-            [ Attr.width (round width)
-            , Attr.height (round height)
-            , Attr.style "display" "block"
-            , Attr.style "background-color" "#292C34"
-            ]
-            [ WebGL.entityWith [ cullFace back ]
-                vertexShader
-                fragmentShader
-                manualCrates
-                { perspective = perspective (width / height) cameraAngle cameraDistance cameraUp }
-            ]
+        [ Scene3d.custom
+            (let
+                lightPoint =
+                    case lightPosition of
+                        ( x, y, z ) ->
+                            Point3d.inches x y z
+             in
+             { lights =
+                Scene3d.twoLights
+                    (Scene3d.Light.point (Scene3d.Light.castsShadows True)
+                        { chromaticity = Scene3d.Light.incandescent
+                        , intensity = LuminousFlux.lumens 50000
+                        , position = lightPoint
+                        }
+                    )
+                    (Scene3d.Light.ambient
+                        { chromaticity = Scene3d.Light.incandescent
+                        , intensity = Illuminance.lux 10000
+                        }
+                    )
+             , camera =
+                Camera3d.perspective
+                    { viewpoint =
+                        case cameraPosition of
+                            ( x, y, z ) ->
+                                Viewpoint3d.lookAt
+                                    { eyePoint =
+                                        Point3d.inches x y z
+                                    , focalPoint = Point3d.translateIn (Direction3dWire.toDirection3d cameraAngle) (Quantity.Quantity 1) (Point3d.inches x y z)
+                                    , upDirection = Direction3d.positiveZ
+                                    }
+                    , verticalFieldOfView = Angle.degrees 45
+                    }
+             , clipDepth = Length.centimeters 0.5
+             , exposure = Scene3d.exposureValue 15
+             , toneMapping = Scene3d.hableFilmicToneMapping
+             , whiteBalance = Scene3d.Light.incandescent
+             , antialiasing = Scene3d.multisampling
+             , dimensions = ( Pixels.int (round width), Pixels.int (round height) )
+             , background = Scene3d.backgroundColor (Color.fromRgba { red = 0.17, green = 0.17, blue = 0.19, alpha = 1 })
+             , entities =
+                [ Sphere3d.atPoint
+                    lightPoint
+                    (Length.inches
+                        0.1
+                    )
+                    |> Scene3d.sphere
+                        (Scene3d.Material.emissive
+                            Scene3d.Light.incandescent
+                            (Luminance.nits
+                                100000
+                            )
+                        )
+                , Cylinder3d.from
+                    Point3d.origin
+                    (Point3d.inches 0 0 1)
+                    (Length.inches
+                        0.5
+                    )
+                    |> Maybe.map
+                        (Scene3d.cylinderWithShadow
+                            (Scene3d.Material.matte Color.blue)
+                        )
+                    |> Maybe.withDefault Scene3d.nothing
+                , Cylinder3d.from
+                    (Point3d.inches 2 2 0.5)
+                    (Point3d.inches 2 2 1)
+                    (Length.inches
+                        0.5
+                    )
+                    |> Maybe.map
+                        (Scene3d.cylinderWithShadow
+                            (Scene3d.Material.matte Color.gray)
+                        )
+                    |> Maybe.withDefault Scene3d.nothing
+                , Scene3d.quad (Scene3d.Material.matte Color.blue)
+                    (Point3d.centimeters 0 0 0)
+                    (Point3d.centimeters 10 0 0)
+                    (Point3d.centimeters 10 10 0)
+                    (Point3d.centimeters 0 10 0)
+                ]
+             }
+            )
         ]
     }
 
 
-perspective ratio cameraAngle cameraDistance cameraUp =
-    Math.Matrix4.mul
-        (Math.Matrix4.makePerspective 45 ratio 0.1 100)
-        (Math.Matrix4.makeLookAt
-            (Math.Vector3.scale cameraDistance (Math.Vector3.normalize cameraAngle))
-            (vec3 0.5 0.5 0.5)
-            cameraUp
-        )
+handleArrowKey : Keyboard.Event.KeyboardEvent -> Maybe ArrowKey
+handleArrowKey { altKey, ctrlKey, keyCode, metaKey, repeat, shiftKey } =
+    if not (altKey || ctrlKey || metaKey || shiftKey || repeat) then
+        case keyCode of
+            Keyboard.Key.A ->
+                Just LeftKey
+
+            Keyboard.Key.Left ->
+                Just LeftKey
+
+            Keyboard.Key.D ->
+                Just RightKey
+
+            Keyboard.Key.Right ->
+                Just RightKey
+
+            Keyboard.Key.S ->
+                Just DownKey
+
+            Keyboard.Key.Down ->
+                Just DownKey
+
+            Keyboard.Key.W ->
+                Just UpKey
+
+            Keyboard.Key.Up ->
+                Just UpKey
+
+            _ ->
+                Nothing
+
+    else
+        Nothing
 
 
+subscriptions : Model -> Sub FrontendMsg
+subscriptions model =
+    Sub.batch
+        [ Browser.Events.onResize (\x y -> WindowResized (toFloat x) (toFloat y))
+        , Browser.Events.onMouseMove
+            (case model.mouseButtonState of
+                Up ->
+                    Json.Decode.fail "Mouse is not down"
 
--- Mesh
+                Down ->
+                    Json.Decode.map2
+                        MouseMoved
+                        (Json.Decode.field "movementX" Json.Decode.float)
+                        (Json.Decode.field "movementY" Json.Decode.float)
+            )
+        , Browser.Events.onMouseDown (Json.Decode.succeed MouseDown)
+        , Browser.Events.onMouseUp (Json.Decode.succeed MouseUp)
+        , Browser.Events.onKeyDown
+            (Keyboard.Event.considerKeyboardEvent
+                (\event -> Maybe.map (\key -> ArrowKeyChanged key Down) (handleArrowKey event))
+            )
+        , Browser.Events.onKeyUp
+            (Keyboard.Event.considerKeyboardEvent
+                (\event -> Maybe.map (\key -> ArrowKeyChanged key Up) (handleArrowKey event))
+            )
+        , Browser.Events.onAnimationFrameDelta
+            (\milliseconds ->
+                case ( ( model.upKey, model.downKey ), ( model.leftKey, model.rightKey ) ) of
+                    ( ( Up, Up ), ( Up, Up ) ) ->
+                        NoOpFrontendMsg
 
-
-type alias Vertex =
-    { position : Vec3
-    , color : Vec3
-    }
-
-
-manualCrates : WebGL.Mesh Vertex
-manualCrates =
-    WebGL.indexedTriangles
-        [ { position = vec3 0 0 0, color = vec3 0 0 0 }
-        , { position = vec3 1 0 0, color = vec3 1 0 0 }
-        , { position = vec3 1 1 0, color = vec3 1 1 0 }
-        , { position = vec3 0 1 0, color = vec3 0 1 0 }
-        , { position = vec3 0 0 1, color = vec3 0 0 1 }
-        , { position = vec3 1 0 1, color = vec3 1 0 1 }
-        , { position = vec3 1 1 1, color = vec3 1 1 1 }
-        , { position = vec3 0 1 1, color = vec3 0 1 1 }
+                    _ ->
+                        Tick milliseconds
+            )
         ]
-        [ ( 1, 0, 2 )
-        , ( 2, 0, 3 )
-        , ( 0, 1, 4 )
-        , ( 4, 1, 5 )
-        , ( 1, 2, 5 )
-        , ( 5, 2, 6 )
-        , ( 2, 3, 6 )
-        , ( 6, 3, 7 )
-        , ( 3, 0, 7 )
-        , ( 7, 0, 4 )
-        , ( 4, 5, 7 )
-        , ( 7, 5, 6 )
-        ]
-
-
-
--- 3D drawing of the vertexes:
---
---                7-------6
---               /|      /|
---              / |     / |
---             4--|----5  |
---             |  3----|--2
---             | /     | /
---             |/      |/
---             0-------1
---
--- The triangles are drawn counter-clockwise, 2 triangles per face.
-
-
-crate : WebGL.Mesh Vertex
-crate =
-    [ ( 0, 0 ), ( 90, 0 ), ( 180, 0 ), ( 270, 0 ), ( 0, 90 ), ( 0, -90 ) ]
-        |> List.concatMap rotatedSquare
-        |> WebGL.triangles
-
-
-rotatedSquare : ( Float, Float ) -> List ( Vertex, Vertex, Vertex )
-rotatedSquare ( angleXZ, angleYZ ) =
-    let
-        transformMat =
-            Math.Matrix4.mul
-                (Math.Matrix4.makeRotate (degrees angleXZ) Math.Vector3.j)
-                (Math.Matrix4.makeRotate (degrees angleYZ) Math.Vector3.i)
-
-        transform vertex =
-            { vertex
-                | position =
-                    Math.Matrix4.transform transformMat vertex.position
-            }
-
-        transformTriangle ( a, b, c ) =
-            ( transform a, transform b, transform c )
-    in
-    List.map transformTriangle square
-
-
-square : List ( Vertex, Vertex, Vertex )
-square =
-    let
-        topLeft =
-            Vertex (vec3 -1 1 1) (vec3 1 1 0)
-
-        topRight =
-            Vertex (vec3 1 1 1) (vec3 1 0 1)
-
-        bottomLeft =
-            Vertex (vec3 -1 -1 1) (vec3 0 0 0)
-
-        bottomRight =
-            Vertex (vec3 1 -1 1) (vec3 0 1 1)
-    in
-    [ ( topLeft, topRight, bottomLeft )
-    , ( bottomLeft, topRight, bottomRight )
-    ]
-
-
-
--- Shaders
-
-
-type alias Uniforms =
-    { perspective : Mat4 }
-
-
-vertexShader : WebGL.Shader Vertex Uniforms { vcolor : Vec3 }
-vertexShader =
-    [glsl|
-
-        attribute vec3 position;
-        attribute vec3 color;
-        uniform mat4 perspective;
-        varying vec3 vcolor;
-
-        void main () {
-            gl_Position = perspective * vec4(position, 1.0);
-            vcolor = color;
-        }
-
-    |]
-
-
-fragmentShader : WebGL.Shader {} Uniforms { vcolor : Vec3 }
-fragmentShader =
-    [glsl|
-
-        precision mediump float;
-        varying vec3 vcolor;
-
-        void main () {
-            gl_FragColor = vec4(vcolor, 1.0);
-        }
-
-    |]

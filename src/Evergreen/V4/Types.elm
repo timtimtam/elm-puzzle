@@ -1,6 +1,6 @@
-module Types exposing (..)
+module Evergreen.V4.Types exposing (..)
 
-import Direction3dWire exposing (Direction3dWire)
+import Evergreen.V4.Direction3dWire
 
 
 type ButtonState
@@ -20,7 +20,7 @@ type alias FrontendModel =
     , rightKey : ButtonState
     , upKey : ButtonState
     , downKey : ButtonState
-    , cameraAngle : Direction3dWire RealWorldCoordinates
+    , cameraAngle : Evergreen.V4.Direction3dWire.Direction3dWire RealWorldCoordinates
     , cameraPosition : ( Float, Float, Float )
     , mouseButtonState : ButtonState
     , lightPosition : ( Float, Float, Float )
