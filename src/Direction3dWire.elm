@@ -1,4 +1,4 @@
-module Direction3dWire exposing (Direction3dWire, fromDirection3d, toDirection3d)
+module Direction3dWire exposing (Direction3dWire(..), fromDirection3d, toDirection3d)
 
 import Direction3d exposing (Direction3d)
 

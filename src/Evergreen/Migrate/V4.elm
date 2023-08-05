@@ -60,40 +60,24 @@ migrate_Types_FrontendModel : Evergreen.V1.Types.FrontendModel -> Evergreen.V4.T
 migrate_Types_FrontendModel old =
     { width = old.width
     , height = old.height
-    , mousePosition = (Unimplemented {- Type `(Float, Float)` was added in V4. I need you to set a default value. -})
-    , leftKey = (Unimplemented {- Type `Evergreen.V4.Types.ButtonState` was added in V4. I need you to set a default value. -})
-    , rightKey = (Unimplemented {- Type `Evergreen.V4.Types.ButtonState` was added in V4. I need you to set a default value. -})
-    , upKey = (Unimplemented {- Type `Evergreen.V4.Types.ButtonState` was added in V4. I need you to set a default value. -})
-    , downKey = (Unimplemented {- Type `Evergreen.V4.Types.ButtonState` was added in V4. I need you to set a default value. -})
+    , mousePosition = ( 0, 0 )
+    , leftKey = Evergreen.V4.Types.Up
+    , rightKey = Evergreen.V4.Types.Up
+    , upKey = Evergreen.V4.Types.Up
+    , downKey = Evergreen.V4.Types.Up
     , cameraAngle = old.cameraAngle |> migrate_Direction3dWire_Direction3dWire
-    , cameraPosition = (Unimplemented {- Type `(Float, Float, Float)` was added in V4. I need you to set a default value. -})
+    , cameraPosition = ( 2, 2, 2 )
     , mouseButtonState = old.mouseButtonState |> migrate_Types_ButtonState
-    , lightPosition = (Unimplemented {- Type `(Float, Float, Float)` was added in V4. I need you to set a default value. -})
-    , cameraDistance = (Unimplemented {- Field of type `Float` was removed in V4. I need you to do something with the `old.cameraDistance` value if you wish to keep the data, then remove this line. -})
-    , cameraUp = (Unimplemented {- Field of type `elm-explorations/linear-algebra:Math.Vector3.Vec3` was removed in V4. I need you to do something with the `old.cameraUp` value if you wish to keep the data, then remove this line. -})
+    , lightPosition = ( 3, 3, 3 )
     }
 
 
-migrate_Direction3dWire_Direction3dWire : Math.Vector3.Direction3dWire -> Evergreen.V4.Direction3dWire.Direction3dWire coordinates_new
+migrate_Direction3dWire_Direction3dWire : Math.Vector3.Vec3 -> Evergreen.V4.Direction3dWire.Direction3dWire coordinates_new
 migrate_Direction3dWire_Direction3dWire old =
-    case old of
-        Math.Vector3.Vec3 ->
-            (Unimplemented
-             {- `Vec3` was removed or renamed in V4 so I couldn't figure out how to migrate it.
-                I need you to decide what happens to this Math.Vector3.Vec3 value in a migration.
-                See https://lamdera.com/tips/modified-custom-type for more info.
-             -}
-            )
-
-        notices ->
-            {- @NOTICE `Direction3dWire Float Float Float` was added in V4.
-               This is just a reminder in case migrating some subset of the old data to this new value was important.
-               See https://lamdera.com/tips/modified-custom-type for more info.
-            -}
-            (Unimplemented {- New constructors were added. I need you to resolve the above notices and then remove this case. -})
+    Math.Vector3.toRecord old |> (\{ x, y, z } -> Evergreen.V4.Direction3dWire.Direction3dWire x y z)
 
 
-migrate_Types_ButtonState : Evergreen.V1.Types.ButtonState -> Evergreen.V4.Types.ButtonState
+migrate_Types_ButtonState : Evergreen.V1.Types.MouseButtonState -> Evergreen.V4.Types.ButtonState
 migrate_Types_ButtonState old =
     case old of
         Evergreen.V1.Types.Up ->
@@ -120,14 +104,3 @@ migrate_Types_FrontendMsg old =
 
         Evergreen.V1.Types.NoOpFrontendMsg ->
             Evergreen.V4.Types.NoOpFrontendMsg
-
-        notices ->
-            {- @NOTICE `Tick Float` was added in V4.
-               This is just a reminder in case migrating some subset of the old data to this new value was important.
-               See https://lamdera.com/tips/modified-custom-type for more info.
-            -}
-            {- @NOTICE `ArrowKeyChanged ArrowKey ButtonState` was added in V4.
-               This is just a reminder in case migrating some subset of the old data to this new value was important.
-               See https://lamdera.com/tips/modified-custom-type for more info.
-            -}
-            (Unimplemented {- New constructors were added. I need you to resolve the above notices and then remove this case. -})
