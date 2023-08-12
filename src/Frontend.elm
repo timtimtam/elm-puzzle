@@ -216,55 +216,50 @@ view : Model -> Browser.Document FrontendMsg
 view { width, height, cameraAngle, cameraPosition, lightPosition } =
     { title = "Hello"
     , body =
-        [ Html.div
-            [ Html.Attributes.style "overflow" "hidden"
-            , Html.Attributes.style "overscroll-behavior" "none"
-            ]
-            [ Scene3d.custom
-                (let
-                    lightPoint =
-                        case lightPosition of
-                            ( x, y, z ) ->
-                                Point3d.inches x y z
-                 in
-                 { lights =
-                    Scene3d.twoLights
-                        (Scene3d.Light.point (Scene3d.Light.castsShadows True)
-                            { chromaticity = Scene3d.Light.incandescent
-                            , intensity = LuminousFlux.lumens 50000
-                            , position = lightPoint
-                            }
-                        )
-                        (Scene3d.Light.ambient
-                            { chromaticity = Scene3d.Light.incandescent
-                            , intensity = Illuminance.lux 10000
-                            }
-                        )
-                 , camera =
-                    Camera3d.perspective
-                        { viewpoint =
-                            case cameraPosition of
-                                ( x, y, z ) ->
-                                    Viewpoint3d.lookAt
-                                        { eyePoint =
-                                            Point3d.inches x y z
-                                        , focalPoint = Point3d.translateIn (Direction3dWire.toDirection3d cameraAngle) (Quantity.Quantity 1) (Point3d.inches x y z)
-                                        , upDirection = Direction3d.positiveZ
-                                        }
-                        , verticalFieldOfView = Angle.degrees 45
+        [ Scene3d.custom
+            (let
+                lightPoint =
+                    case lightPosition of
+                        ( x, y, z ) ->
+                            Point3d.inches x y z
+             in
+             { lights =
+                Scene3d.twoLights
+                    (Scene3d.Light.point (Scene3d.Light.castsShadows True)
+                        { chromaticity = Scene3d.Light.incandescent
+                        , intensity = LuminousFlux.lumens 50000
+                        , position = lightPoint
                         }
-                 , clipDepth = Length.centimeters 0.5
-                 , exposure = Scene3d.exposureValue 15
-                 , toneMapping = Scene3d.hableFilmicToneMapping
-                 , whiteBalance = Scene3d.Light.incandescent
-                 , antialiasing = Scene3d.multisampling
-                 , dimensions = ( Pixels.int (round width), Pixels.int (round height) )
-                 , background = Scene3d.backgroundColor (Color.fromRgba { red = 0.17, green = 0.17, blue = 0.19, alpha = 1 })
-                 , entities =
-                    (lightEntity |> Scene3d.translateBy (Vector3d.fromTuple Length.inches lightPosition)) :: staticEntities
-                 }
-                )
-            ]
+                    )
+                    (Scene3d.Light.ambient
+                        { chromaticity = Scene3d.Light.incandescent
+                        , intensity = Illuminance.lux 10000
+                        }
+                    )
+             , camera =
+                Camera3d.perspective
+                    { viewpoint =
+                        case cameraPosition of
+                            ( x, y, z ) ->
+                                Viewpoint3d.lookAt
+                                    { eyePoint =
+                                        Point3d.inches x y z
+                                    , focalPoint = Point3d.translateIn (Direction3dWire.toDirection3d cameraAngle) (Quantity.Quantity 1) (Point3d.inches x y z)
+                                    , upDirection = Direction3d.positiveZ
+                                    }
+                    , verticalFieldOfView = Angle.degrees 45
+                    }
+             , clipDepth = Length.centimeters 0.5
+             , exposure = Scene3d.exposureValue 15
+             , toneMapping = Scene3d.hableFilmicToneMapping
+             , whiteBalance = Scene3d.Light.incandescent
+             , antialiasing = Scene3d.multisampling
+             , dimensions = ( Pixels.int (round width), Pixels.int (round height) )
+             , background = Scene3d.backgroundColor (Color.fromRgba { red = 0.17, green = 0.17, blue = 0.19, alpha = 1 })
+             , entities =
+                (lightEntity |> Scene3d.translateBy (Vector3d.fromTuple Length.inches lightPosition)) :: staticEntities
+             }
+            )
         ]
     }
 
