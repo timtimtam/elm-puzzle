@@ -216,7 +216,11 @@ view : Model -> Browser.Document FrontendMsg
 view { width, height, cameraAngle, cameraPosition, lightPosition } =
     { title = "Hello"
     , body =
-        [ Html.div [ Html.Attributes.style "position" "fixed" ]
+        [ Html.div
+            [ Html.Attributes.style "position" "fixed"
+            , Html.Attributes.style "height" "100vh"
+            , Html.Attributes.style "overflow" "hidden"
+            ]
             [ Scene3d.custom
                 (let
                     lightPoint =
