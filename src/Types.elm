@@ -15,7 +15,7 @@ type RealWorldCoordinates
 type alias FrontendModel =
     { width : Float
     , height : Float
-    , mousePosition : ( Float, Float )
+    , mouseDelta : ( Float, Float )
     , leftKey : ButtonState
     , rightKey : ButtonState
     , upKey : ButtonState

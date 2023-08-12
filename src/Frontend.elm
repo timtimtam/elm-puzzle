@@ -13,6 +13,8 @@ import Color
 import Cylinder3d
 import Direction3d
 import Direction3dWire
+import Html
+import Html.Attributes
 import Illuminance
 import Json.Decode
 import Keyboard.Event
@@ -72,7 +74,7 @@ init _ _ =
       , rightKey = Up
       , upKey = Up
       , downKey = Up
-      , mousePosition = ( 0, 0 )
+      , mouseDelta = ( 0, 0 )
       , lightPosition = ( 3, 3, 3 )
       }
     , Task.attempt handleResult Browser.Dom.getViewport
@@ -90,6 +92,23 @@ update msg model =
                 scaledDelta =
                     delta * 0.005
 
+                cameraUp =
+                    Direction3d.positiveZ
+
+                cameraAngle =
+                    Direction3dWire.toDirection3d model.cameraAngle
+
+                cameraLeft =
+                    Vector3d.direction
+                        (Vector3d.cross
+                            (Direction3d.toVector cameraUp)
+                            (Direction3d.toVector cameraAngle)
+                        )
+                        |> Maybe.map Direction3d.toVector
+
+                cameraLeftDirection =
+                    cameraLeft |> Maybe.andThen Vector3d.direction
+
                 newCameraPosition =
                     -- Move the camera based on the arrow keys
                     let
@@ -99,16 +118,9 @@ update msg model =
                         cameraAngleXY =
                             Direction3d.projectOnto Plane3d.xy (Direction3dWire.toDirection3d model.cameraAngle)
                     in
-                    case cameraAngleXY of
-                        Just angleXY ->
+                    case ( cameraAngleXY, cameraLeft ) of
+                        ( Just angleXY, Just left ) ->
                             let
-                                cameraLeft =
-                                    Vector3d.normalize
-                                        (Vector3d.cross
-                                            (Direction3d.toVector angleXY)
-                                            (Direction3d.toVector Direction3d.positiveZ)
-                                        )
-
                                 forward =
                                     Direction3d.toVector angleXY
                             in
@@ -125,10 +137,10 @@ update msg model =
                                 |> Vector3d.plus
                                     (case ( model.leftKey, model.rightKey ) of
                                         ( Up, Down ) ->
-                                            Vector3d.scaleBy -scaledDelta cameraLeft
+                                            Vector3d.scaleBy scaledDelta left
 
                                         ( Down, Up ) ->
-                                            Vector3d.scaleBy scaledDelta cameraLeft
+                                            Vector3d.scaleBy -scaledDelta left
 
                                         _ ->
                                             Vector3d.zero
@@ -136,31 +148,14 @@ update msg model =
                                 |> Vector3d.plus positionVector
                                 |> Vector3d.toTuple Quantity.toFloat
 
-                        Nothing ->
+                        _ ->
                             model.cameraPosition
-            in
-            ( { model | cameraPosition = newCameraPosition }, Cmd.none )
 
-        ( MouseMoved x y, Down ) ->
-            let
-                cameraUp =
-                    Direction3d.positiveZ
-
-                cameraAngle =
-                    Direction3dWire.toDirection3d model.cameraAngle
-
-                cameraLeft =
-                    Vector3d.direction
-                        (Vector3d.cross
-                            (Direction3d.toVector cameraUp)
-                            (Direction3d.toVector cameraAngle)
-                        )
-
-                ( newAngle, _ ) =
-                    case cameraLeft of
-                        Just left ->
-                            let
-                                angle =
+                newAngle =
+                    case model.mouseDelta of
+                        ( x, y ) ->
+                            case cameraLeftDirection of
+                                Just left ->
                                     cameraAngle
                                         |> Direction3d.rotateAround
                                             (Axis3d.through Point3d.origin cameraUp)
@@ -168,21 +163,24 @@ update msg model =
                                         |> Direction3d.rotateAround
                                             (Axis3d.through Point3d.origin left)
                                             (Angle.radians (-4 * y / model.height))
-                            in
-                            ( angle
-                            , Vector3d.direction
-                                (Vector3d.cross
-                                    (Direction3d.toVector angle)
-                                    (Direction3d.toVector left)
-                                )
-                                |> Maybe.withDefault cameraUp
-                            )
 
-                        Nothing ->
-                            ( cameraAngle, cameraUp )
+                                Nothing ->
+                                    cameraAngle
             in
             ( { model
-                | cameraAngle = Direction3dWire.fromDirection3d newAngle
+                | cameraPosition = newCameraPosition
+                , cameraAngle = Direction3dWire.fromDirection3d newAngle
+                , mouseDelta = ( 0, 0 )
+              }
+            , Cmd.none
+            )
+
+        ( MouseMoved x y, Down ) ->
+            ( { model
+                | mouseDelta =
+                    case model.mouseDelta of
+                        ( a, b ) ->
+                            ( a + x, b + y )
               }
             , Cmd.none
             )
@@ -218,91 +216,100 @@ view : Model -> Browser.Document FrontendMsg
 view { width, height, cameraAngle, cameraPosition, lightPosition } =
     { title = "Hello"
     , body =
-        [ Scene3d.custom
-            (let
-                lightPoint =
-                    case lightPosition of
-                        ( x, y, z ) ->
-                            Point3d.inches x y z
-             in
-             { lights =
-                Scene3d.twoLights
-                    (Scene3d.Light.point (Scene3d.Light.castsShadows True)
-                        { chromaticity = Scene3d.Light.incandescent
-                        , intensity = LuminousFlux.lumens 50000
-                        , position = lightPoint
-                        }
-                    )
-                    (Scene3d.Light.ambient
-                        { chromaticity = Scene3d.Light.incandescent
-                        , intensity = Illuminance.lux 10000
-                        }
-                    )
-             , camera =
-                Camera3d.perspective
-                    { viewpoint =
-                        case cameraPosition of
+        [ Html.div [ Html.Attributes.style "position" "fixed" ]
+            [ Scene3d.custom
+                (let
+                    lightPoint =
+                        case lightPosition of
                             ( x, y, z ) ->
-                                Viewpoint3d.lookAt
-                                    { eyePoint =
-                                        Point3d.inches x y z
-                                    , focalPoint = Point3d.translateIn (Direction3dWire.toDirection3d cameraAngle) (Quantity.Quantity 1) (Point3d.inches x y z)
-                                    , upDirection = Direction3d.positiveZ
-                                    }
-                    , verticalFieldOfView = Angle.degrees 45
-                    }
-             , clipDepth = Length.centimeters 0.5
-             , exposure = Scene3d.exposureValue 15
-             , toneMapping = Scene3d.hableFilmicToneMapping
-             , whiteBalance = Scene3d.Light.incandescent
-             , antialiasing = Scene3d.multisampling
-             , dimensions = ( Pixels.int (round width), Pixels.int (round height) )
-             , background = Scene3d.backgroundColor (Color.fromRgba { red = 0.17, green = 0.17, blue = 0.19, alpha = 1 })
-             , entities =
-                [ Sphere3d.atPoint
-                    lightPoint
-                    (Length.inches
-                        0.1
-                    )
-                    |> Scene3d.sphere
-                        (Scene3d.Material.emissive
-                            Scene3d.Light.incandescent
-                            (Luminance.nits
-                                100000
-                            )
+                                Point3d.inches x y z
+                 in
+                 { lights =
+                    Scene3d.twoLights
+                        (Scene3d.Light.point (Scene3d.Light.castsShadows True)
+                            { chromaticity = Scene3d.Light.incandescent
+                            , intensity = LuminousFlux.lumens 50000
+                            , position = lightPoint
+                            }
                         )
-                , Cylinder3d.from
-                    Point3d.origin
-                    (Point3d.inches 0 0 1)
-                    (Length.inches
-                        0.5
-                    )
-                    |> Maybe.map
-                        (Scene3d.cylinderWithShadow
-                            (Scene3d.Material.matte Color.blue)
+                        (Scene3d.Light.ambient
+                            { chromaticity = Scene3d.Light.incandescent
+                            , intensity = Illuminance.lux 10000
+                            }
                         )
-                    |> Maybe.withDefault Scene3d.nothing
-                , Cylinder3d.from
-                    (Point3d.inches 2 2 0.5)
-                    (Point3d.inches 2 2 1)
-                    (Length.inches
-                        0.5
-                    )
-                    |> Maybe.map
-                        (Scene3d.cylinderWithShadow
-                            (Scene3d.Material.matte Color.gray)
-                        )
-                    |> Maybe.withDefault Scene3d.nothing
-                , Scene3d.quad (Scene3d.Material.matte Color.blue)
-                    (Point3d.centimeters 0 0 0)
-                    (Point3d.centimeters 10 0 0)
-                    (Point3d.centimeters 10 10 0)
-                    (Point3d.centimeters 0 10 0)
-                ]
-             }
-            )
+                 , camera =
+                    Camera3d.perspective
+                        { viewpoint =
+                            case cameraPosition of
+                                ( x, y, z ) ->
+                                    Viewpoint3d.lookAt
+                                        { eyePoint =
+                                            Point3d.inches x y z
+                                        , focalPoint = Point3d.translateIn (Direction3dWire.toDirection3d cameraAngle) (Quantity.Quantity 1) (Point3d.inches x y z)
+                                        , upDirection = Direction3d.positiveZ
+                                        }
+                        , verticalFieldOfView = Angle.degrees 45
+                        }
+                 , clipDepth = Length.centimeters 0.5
+                 , exposure = Scene3d.exposureValue 15
+                 , toneMapping = Scene3d.hableFilmicToneMapping
+                 , whiteBalance = Scene3d.Light.incandescent
+                 , antialiasing = Scene3d.multisampling
+                 , dimensions = ( Pixels.int (round width), Pixels.int (round height) )
+                 , background = Scene3d.backgroundColor (Color.fromRgba { red = 0.17, green = 0.17, blue = 0.19, alpha = 1 })
+                 , entities =
+                    (lightEntity |> Scene3d.translateBy (Vector3d.fromTuple Length.inches lightPosition)) :: staticEntities
+                 }
+                )
+            ]
         ]
     }
+
+
+lightEntity =
+    Sphere3d.atPoint
+        (Point3d.inches 0 0 0)
+        (Length.inches
+            0.1
+        )
+        |> Scene3d.sphere
+            (Scene3d.Material.emissive
+                Scene3d.Light.incandescent
+                (Luminance.nits
+                    100000
+                )
+            )
+
+
+staticEntities =
+    [ Cylinder3d.from
+        Point3d.origin
+        (Point3d.inches 0 0 1)
+        (Length.inches
+            0.5
+        )
+        |> Maybe.map
+            (Scene3d.cylinderWithShadow
+                (Scene3d.Material.matte Color.blue)
+            )
+        |> Maybe.withDefault Scene3d.nothing
+    , Cylinder3d.from
+        (Point3d.inches 2 2 0.5)
+        (Point3d.inches 2 2 1)
+        (Length.inches
+            0.5
+        )
+        |> Maybe.map
+            (Scene3d.cylinderWithShadow
+                (Scene3d.Material.matte Color.gray)
+            )
+        |> Maybe.withDefault Scene3d.nothing
+    , Scene3d.quad (Scene3d.Material.matte Color.blue)
+        (Point3d.centimeters 0 0 0)
+        (Point3d.centimeters 10 0 0)
+        (Point3d.centimeters 10 10 0)
+        (Point3d.centimeters 0 10 0)
+    ]
 
 
 handleArrowKey : Keyboard.Event.KeyboardEvent -> Maybe ArrowKey
@@ -367,11 +374,6 @@ subscriptions model =
             )
         , Browser.Events.onAnimationFrameDelta
             (\milliseconds ->
-                case ( ( model.upKey, model.downKey ), ( model.leftKey, model.rightKey ) ) of
-                    ( ( Up, Up ), ( Up, Up ) ) ->
-                        NoOpFrontendMsg
-
-                    _ ->
-                        Tick milliseconds
+                Tick milliseconds
             )
         ]
