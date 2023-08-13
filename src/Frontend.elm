@@ -67,8 +67,8 @@ init _ _ =
     in
     ( { width = 0
       , height = 0
-      , cameraAngle = Direction3dWire.fromDirection3d Direction3d.positiveY
-      , cameraPosition = ( 2, 2, 2 )
+      , cameraAngle = Direction3dWire.fromDirection3d (Maybe.withDefault Direction3d.positiveX (Direction3d.from (Point3d.inches 5 -4 2) (Point3d.inches 2 2 2)))
+      , cameraPosition = ( 5, -4, 2 )
       , mouseButtonState = Up
       , leftKey = Up
       , rightKey = Up
@@ -175,6 +175,8 @@ update msg model =
               }
             , Cmd.none
             )
+                |> Debug.log
+                    "Position"
 
         ( MouseMoved x y, Down ) ->
             ( { model
@@ -288,7 +290,7 @@ view { width, height, cameraAngle, cameraPosition, lightPosition } =
                         )
                         (Scene3d.Light.ambient
                             { chromaticity = Scene3d.Light.incandescent
-                            , intensity = Illuminance.lux 10000
+                            , intensity = Illuminance.lux 30000
                             }
                         )
                  , camera =
@@ -335,6 +337,10 @@ lightEntity =
             )
 
 
+worldSize =
+    64
+
+
 staticEntities =
     [ Cylinder3d.from
         Point3d.origin
@@ -359,10 +365,10 @@ staticEntities =
             )
         |> Maybe.withDefault Scene3d.nothing
     , Scene3d.quad (Scene3d.Material.matte Color.blue)
-        (Point3d.centimeters 0 0 0)
-        (Point3d.centimeters 10 0 0)
-        (Point3d.centimeters 10 10 0)
-        (Point3d.centimeters 0 10 0)
+        (Point3d.inches -worldSize -worldSize 0)
+        (Point3d.inches worldSize -worldSize 0)
+        (Point3d.inches worldSize worldSize 0)
+        (Point3d.inches -worldSize worldSize 0)
     ]
 
 

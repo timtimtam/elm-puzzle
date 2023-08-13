@@ -69,7 +69,7 @@ migrate_Types_FrontendModel old =
     , cameraAngle = old.cameraAngle |> migrate_Direction3dWire_Direction3dWire migrate_Types_RealWorldCoordinates
     , cameraPosition = old.cameraPosition
     , mouseButtonState = old.mouseButtonState |> migrate_Types_ButtonState
-    , touches = NotOneFinger
+    , touches = Evergreen.V10.Types.NotOneFinger
     , lightPosition = old.lightPosition
     }
 
