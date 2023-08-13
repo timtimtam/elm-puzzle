@@ -12,6 +12,11 @@ type RealWorldCoordinates
     = RealWorldCoordinates
 
 
+type TouchContact
+    = OneFinger { identifier : Int, screenPos : ( Float, Float ) }
+    | NotOneFinger
+
+
 type alias FrontendModel =
     { width : Float
     , height : Float
@@ -23,6 +28,7 @@ type alias FrontendModel =
     , cameraAngle : Direction3dWire RealWorldCoordinates
     , cameraPosition : ( Float, Float, Float )
     , mouseButtonState : ButtonState
+    , touches : TouchContact
     , lightPosition : ( Float, Float, Float )
     }
 
@@ -46,6 +52,7 @@ type FrontendMsg
     | MouseDown
     | MouseUp
     | ArrowKeyChanged ArrowKey ButtonState
+    | TouchesChanged TouchContact
     | NoOpFrontendMsg
 
 

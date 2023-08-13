@@ -14,7 +14,7 @@ import Cylinder3d
 import Direction3d
 import Direction3dWire
 import Html
-import Html.Attributes
+import Html.Events.Extra.Touch
 import Illuminance
 import Json.Decode
 import Keyboard.Event
@@ -32,7 +32,7 @@ import Scene3d.Light
 import Scene3d.Material
 import Sphere3d
 import Task
-import Types exposing (ArrowKey(..), ButtonState(..), FrontendModel, FrontendMsg(..))
+import Types exposing (ArrowKey(..), ButtonState(..), FrontendModel, FrontendMsg(..), TouchContact(..))
 import Url
 import Vector3d
 import Viewpoint3d
@@ -76,6 +76,7 @@ init _ _ =
       , downKey = Up
       , mouseDelta = ( 0, 0 )
       , lightPosition = ( 3, 3, 3 )
+      , touches = NotOneFinger
       }
     , Task.attempt handleResult Browser.Dom.getViewport
     )
@@ -208,58 +209,113 @@ update msg model =
                 RightKey ->
                     ( { model | rightKey = state }, Cmd.none )
 
+        ( TouchesChanged contact, _ ) ->
+            let
+                zeroDelta =
+                    ( 0, 0 )
+
+                delta =
+                    case ( model.touches, contact ) of
+                        ( OneFinger old, OneFinger new ) ->
+                            if old.identifier == new.identifier then
+                                tupleSubtract new.screenPos old.screenPos
+
+                            else
+                                zeroDelta
+
+                        _ ->
+                            zeroDelta
+
+                totalDelta =
+                    tupleAdd delta model.mouseDelta
+            in
+            ( { model | touches = contact, mouseDelta = totalDelta }, Cmd.none )
+
         ( NoOpFrontendMsg, _ ) ->
             ( model, Cmd.none )
+
+
+tupleSubtract a b =
+    case ( a, b ) of
+        ( ( a1, a2 ), ( b1, b2 ) ) ->
+            ( a1 - b1, a2 - b2 )
+
+
+tupleAdd a b =
+    case ( a, b ) of
+        ( ( a1, a2 ), ( b1, b2 ) ) ->
+            ( a1 + b1, a2 + b2 )
+
+
+toTouchMsg : { a | touches : List { b | identifier : Int, screenPos : ( Float, Float ) } } -> FrontendMsg
+toTouchMsg e =
+    TouchesChanged
+        (case e.touches of
+            [ touch ] ->
+                OneFinger
+                    { identifier = touch.identifier
+                    , screenPos = touch.screenPos
+                    }
+
+            _ ->
+                NotOneFinger
+        )
 
 
 view : Model -> Browser.Document FrontendMsg
 view { width, height, cameraAngle, cameraPosition, lightPosition } =
     { title = "Hello"
     , body =
-        [ Scene3d.custom
-            (let
-                lightPoint =
-                    case lightPosition of
-                        ( x, y, z ) ->
-                            Point3d.inches x y z
-             in
-             { lights =
-                Scene3d.twoLights
-                    (Scene3d.Light.point (Scene3d.Light.castsShadows True)
-                        { chromaticity = Scene3d.Light.incandescent
-                        , intensity = LuminousFlux.lumens 50000
-                        , position = lightPoint
-                        }
-                    )
-                    (Scene3d.Light.ambient
-                        { chromaticity = Scene3d.Light.incandescent
-                        , intensity = Illuminance.lux 10000
-                        }
-                    )
-             , camera =
-                Camera3d.perspective
-                    { viewpoint =
-                        case cameraPosition of
+        [ Html.div
+            [ Html.Events.Extra.Touch.onStart toTouchMsg
+            , Html.Events.Extra.Touch.onMove toTouchMsg
+            , Html.Events.Extra.Touch.onEnd toTouchMsg
+            ]
+            [ Scene3d.custom
+                (let
+                    lightPoint =
+                        case lightPosition of
                             ( x, y, z ) ->
-                                Viewpoint3d.lookAt
-                                    { eyePoint =
-                                        Point3d.inches x y z
-                                    , focalPoint = Point3d.translateIn (Direction3dWire.toDirection3d cameraAngle) (Quantity.Quantity 1) (Point3d.inches x y z)
-                                    , upDirection = Direction3d.positiveZ
-                                    }
-                    , verticalFieldOfView = Angle.degrees 45
-                    }
-             , clipDepth = Length.centimeters 0.5
-             , exposure = Scene3d.exposureValue 15
-             , toneMapping = Scene3d.hableFilmicToneMapping
-             , whiteBalance = Scene3d.Light.incandescent
-             , antialiasing = Scene3d.multisampling
-             , dimensions = ( Pixels.int (round width), Pixels.int (round height) )
-             , background = Scene3d.backgroundColor (Color.fromRgba { red = 0.17, green = 0.17, blue = 0.19, alpha = 1 })
-             , entities =
-                (lightEntity |> Scene3d.translateBy (Vector3d.fromTuple Length.inches lightPosition)) :: staticEntities
-             }
-            )
+                                Point3d.inches x y z
+                 in
+                 { lights =
+                    Scene3d.twoLights
+                        (Scene3d.Light.point (Scene3d.Light.castsShadows True)
+                            { chromaticity = Scene3d.Light.incandescent
+                            , intensity = LuminousFlux.lumens 50000
+                            , position = lightPoint
+                            }
+                        )
+                        (Scene3d.Light.ambient
+                            { chromaticity = Scene3d.Light.incandescent
+                            , intensity = Illuminance.lux 10000
+                            }
+                        )
+                 , camera =
+                    Camera3d.perspective
+                        { viewpoint =
+                            case cameraPosition of
+                                ( x, y, z ) ->
+                                    Viewpoint3d.lookAt
+                                        { eyePoint =
+                                            Point3d.inches x y z
+                                        , focalPoint = Point3d.translateIn (Direction3dWire.toDirection3d cameraAngle) (Quantity.Quantity 1) (Point3d.inches x y z)
+                                        , upDirection = Direction3d.positiveZ
+                                        }
+                        , verticalFieldOfView = Angle.degrees 45
+                        }
+                 , clipDepth = Length.centimeters 0.5
+                 , exposure = Scene3d.exposureValue 15
+                 , toneMapping = Scene3d.hableFilmicToneMapping
+                 , whiteBalance = Scene3d.Light.incandescent
+                 , antialiasing = Scene3d.multisampling
+                 , dimensions = ( Pixels.int (round width), Pixels.int (round height) )
+                 , background = Scene3d.backgroundColor (Color.fromRgba { red = 0.17, green = 0.17, blue = 0.19, alpha = 1 })
+                 , entities =
+                    (lightEntity |> Scene3d.translateBy (Vector3d.fromTuple Length.inches lightPosition)) :: staticEntities
+                 }
+                )
+            ]
         ]
     }
 
