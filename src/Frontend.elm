@@ -175,8 +175,6 @@ update msg model =
               }
             , Cmd.none
             )
-                |> Debug.log
-                    "Position"
 
         ( MouseMoved x y, Down ) ->
             ( { model
