@@ -257,7 +257,7 @@ update msg model =
                 newJoystickPosition =
                     case contact of
                         OneFinger { screenPos } ->
-                            case ( joystickOrigin model.height |> Debug.log "origin", screenPos |> Debug.log "screenpos" ) of
+                            case ( joystickOrigin model.height, screenPos ) of
                                 ( ( jx, jy ), ( sx, sy ) ) ->
                                     let
                                         newX =
@@ -283,7 +283,7 @@ update msg model =
                         NotOneFinger ->
                             ( 0, 0 )
             in
-            ( { model | lastContact = Touch, joystickPosition = newJoystickPosition } |> Debug.log "model", Cmd.none )
+            ( { model | lastContact = Touch, joystickPosition = newJoystickPosition }, Cmd.none )
 
         ( ShootClicked, _ ) ->
             ( model, Cmd.none )

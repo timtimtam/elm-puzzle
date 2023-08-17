@@ -69,7 +69,7 @@ migrate_Types_FrontendModel old =
     , downKey = old.downKey |> migrate_Types_ButtonState
     , mouseButtonState = old.mouseButtonState |> migrate_Types_ButtonState
     , touches = old.touches |> migrate_Types_TouchContact
-    , joystickPosition = (Unimplemented {- Type `(Float, Float)` was added in V15. I need you to set a default value. -})
+    , joystickPosition = ( 0, 0 )
     , lightPosition = old.lightPosition
     , lastContact = old.lastContact |> migrate_Types_ContactType
     }
