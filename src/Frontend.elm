@@ -220,10 +220,10 @@ update msg model =
                 newJoystickY =
                     case ( newModel.upKey, newModel.downKey ) of
                         ( Up, Down ) ->
-                            -1
+                            1
 
                         ( Down, Up ) ->
-                            1
+                            -1
 
                         _ ->
                             0
@@ -315,8 +315,9 @@ inputsUnchanged { viewAngleDelta, joystickPosition } =
            )
 
 
+toTouchMsg : Html.Events.Extra.Touch.Event -> TouchContact
 toTouchMsg e =
-    case e.touches of
+    case e.targetTouches of
         [ touch ] ->
             OneFinger
                 { identifier = touch.identifier
