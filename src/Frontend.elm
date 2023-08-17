@@ -13,6 +13,7 @@ import Direction3d
 import Direction3dWire
 import Html
 import Html.Attributes
+import Html.Events
 import Html.Events.Extra.Touch
 import Illuminance
 import Json.Decode
@@ -33,7 +34,7 @@ import Sphere3d
 import Svg
 import Svg.Attributes
 import Task
-import Types exposing (ArrowKey(..), ButtonState(..), FrontendModel, FrontendMsg(..), TouchContact(..))
+import Types exposing (ArrowKey(..), ButtonState(..), ContactType(..), FrontendModel, FrontendMsg(..), TouchContact(..))
 import Url
 import Vector3d
 import Viewpoint3d
@@ -78,6 +79,7 @@ init _ _ =
       , viewAngleDelta = ( 0, 0 )
       , lightPosition = ( 3, 3, 3 )
       , touches = NotOneFinger
+      , lastContact = Mouse
       }
     , Task.attempt handleResult Browser.Dom.getViewport
     )
@@ -186,6 +188,7 @@ update msg model =
                     case model.viewAngleDelta of
                         ( a, b ) ->
                             ( a + x, b + y )
+                , lastContact = Mouse
               }
             , Cmd.none
             )
@@ -194,10 +197,10 @@ update msg model =
             ( model, Cmd.none )
 
         ( MouseDown, _ ) ->
-            ( { model | mouseButtonState = Down }, Cmd.none )
+            ( { model | mouseButtonState = Down, lastContact = Mouse }, Cmd.none )
 
         ( MouseUp, _ ) ->
-            ( { model | mouseButtonState = Up }, Cmd.none )
+            ( { model | mouseButtonState = Up, lastContact = Mouse }, Cmd.none )
 
         ( ArrowKeyChanged key state, _ ) ->
             case key of
@@ -233,7 +236,32 @@ update msg model =
                 totalDelta =
                     tupleAdd delta model.viewAngleDelta
             in
-            ( { model | touches = contact, viewAngleDelta = totalDelta }, Cmd.none )
+            ( { model | touches = contact, viewAngleDelta = totalDelta, lastContact = Touch }, Cmd.none )
+
+        ( JoystickTouchChanged contact, _ ) ->
+            let
+                zeroDelta =
+                    ( 0, 0 )
+
+                delta =
+                    case ( model.touches, contact ) of
+                        ( OneFinger old, OneFinger new ) ->
+                            if old.identifier == new.identifier then
+                                tupleSubtract new.screenPos old.screenPos
+
+                            else
+                                zeroDelta
+
+                        _ ->
+                            zeroDelta
+
+                totalDelta =
+                    tupleAdd delta model.viewAngleDelta
+            in
+            ( { model | touches = contact, viewAngleDelta = totalDelta, lastContact = Touch }, Cmd.none )
+
+        ( ShootClicked, _ ) ->
+            ( model, Cmd.none )
 
         ( NoOpFrontendMsg, _ ) ->
             ( model, Cmd.none )
@@ -251,21 +279,6 @@ tupleAdd a b =
             ( a1 + b1, a2 + b2 )
 
 
-toTouchMsg : { a | touches : List { b | identifier : Int, screenPos : ( Float, Float ) } } -> FrontendMsg
-toTouchMsg e =
-    TouchesChanged
-        (case e.touches of
-            [ touch ] ->
-                OneFinger
-                    { identifier = touch.identifier
-                    , screenPos = touch.screenPos
-                    }
-
-            _ ->
-                NotOneFinger
-        )
-
-
 inputsUnchanged : { a | viewAngleDelta : ( Float, Float ), leftKey : ButtonState, rightKey : ButtonState, upKey : ButtonState, downKey : ButtonState } -> Bool
 inputsUnchanged { viewAngleDelta, leftKey, rightKey, upKey, downKey } =
     (case viewAngleDelta of
@@ -281,37 +294,67 @@ inputsUnchanged { viewAngleDelta, leftKey, rightKey, upKey, downKey } =
            )
 
 
+toTouchMsg : { a | touches : List { b | identifier : Int, screenPos : ( Float, Float ) } } -> TouchContact
+toTouchMsg e =
+    case e.touches of
+        [ touch ] ->
+            OneFinger
+                { identifier = touch.identifier
+                , screenPos = touch.screenPos
+                }
+
+        _ ->
+            NotOneFinger
+
+
 view : Model -> Browser.Document FrontendMsg
-view { width, height, cameraAngle, cameraPosition, lightPosition } =
+view { width, height, cameraAngle, cameraPosition, lightPosition, lastContact } =
     { title = "Hello"
     , body =
         [ Html.div
             [ Html.Attributes.style "position" "fixed"
             , Html.Attributes.style "z-index" "2"
-            , Html.Events.Extra.Touch.onStart toTouchMsg
-            , Html.Events.Extra.Touch.onMove toTouchMsg
-            , Html.Events.Extra.Touch.onEnd toTouchMsg
+            , Html.Events.Extra.Touch.onStart (\event -> TouchesChanged (toTouchMsg event))
+            , Html.Events.Extra.Touch.onMove (\event -> TouchesChanged (toTouchMsg event))
+            , Html.Events.Extra.Touch.onEnd (\event -> TouchesChanged (toTouchMsg event))
             ]
             [ Svg.svg
                 [ Svg.Attributes.width (String.fromFloat width)
                 , Svg.Attributes.height (String.fromFloat height)
                 , Svg.Attributes.viewBox ("0 0 " ++ String.fromFloat width ++ " " ++ String.fromFloat height)
                 ]
-                [ Svg.circle
-                    [ Svg.Attributes.cx (String.fromFloat 100)
-                    , Svg.Attributes.cy (String.fromFloat (height - 100))
-                    , Svg.Attributes.r (String.fromFloat 20)
-                    , Svg.Attributes.fill (Color.toCssString (Color.fromRgba { red = 0, blue = 0, green = 0, alpha = 0.2 }))
-                    ]
-                    []
-                , Svg.circle
-                    [ Svg.Attributes.cx (String.fromFloat 100)
-                    , Svg.Attributes.cy (String.fromFloat (height - 100))
-                    , Svg.Attributes.r (String.fromFloat 50)
-                    , Svg.Attributes.fill (Color.toCssString (Color.fromRgba { red = 0, blue = 0, green = 0, alpha = 0.2 }))
-                    ]
-                    []
-                ]
+                (case lastContact of
+                    Touch ->
+                        [ Svg.circle
+                            [ Svg.Attributes.cx (String.fromFloat 130)
+                            , Svg.Attributes.cy (String.fromFloat (height - 70))
+                            , Svg.Attributes.r (String.fromFloat 20)
+                            , Svg.Attributes.fill (Color.toCssString (Color.fromRgba { red = 0, blue = 0, green = 0, alpha = 0.2 }))
+                            ]
+                            []
+                        , Svg.circle
+                            [ Svg.Attributes.cx (String.fromFloat 130)
+                            , Svg.Attributes.cy (String.fromFloat (height - 70))
+                            , Svg.Attributes.r (String.fromFloat 50)
+                            , Svg.Attributes.fill (Color.toCssString (Color.fromRgba { red = 0, blue = 0, green = 0, alpha = 0.2 }))
+                            , Html.Events.Extra.Touch.onStart (\event -> JoystickTouchChanged (toTouchMsg event))
+                            , Html.Events.Extra.Touch.onMove (\event -> JoystickTouchChanged (toTouchMsg event))
+                            , Html.Events.Extra.Touch.onEnd (\event -> JoystickTouchChanged (toTouchMsg event))
+                            ]
+                            []
+                        , Svg.circle
+                            [ Svg.Attributes.cx (String.fromFloat (width - 100))
+                            , Svg.Attributes.cy (String.fromFloat (height - 200))
+                            , Svg.Attributes.r (String.fromFloat 20)
+                            , Svg.Attributes.fill (Color.toCssString (Color.fromRgba { red = 0, blue = 0, green = 0, alpha = 0.3 }))
+                            , Html.Events.onClick ShootClicked
+                            ]
+                            []
+                        ]
+
+                    Mouse ->
+                        []
+                )
             ]
         , Html.div
             []

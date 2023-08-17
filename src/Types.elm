@@ -30,7 +30,13 @@ type alias FrontendModel =
     , mouseButtonState : ButtonState
     , touches : TouchContact
     , lightPosition : ( Float, Float, Float )
+    , lastContact : ContactType
     }
+
+
+type ContactType
+    = Touch
+    | Mouse
 
 
 type alias BackendModel =
@@ -53,6 +59,8 @@ type FrontendMsg
     | MouseUp
     | ArrowKeyChanged ArrowKey ButtonState
     | TouchesChanged TouchContact
+    | JoystickTouchChanged TouchContact
+    | ShootClicked
     | NoOpFrontendMsg
 
 
