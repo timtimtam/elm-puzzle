@@ -288,6 +288,9 @@ view { width, height, cameraAngle, cameraPosition, lightPosition } =
         [ Html.div
             [ Html.Attributes.style "position" "fixed"
             , Html.Attributes.style "z-index" "2"
+            , Html.Events.Extra.Touch.onStart toTouchMsg
+            , Html.Events.Extra.Touch.onMove toTouchMsg
+            , Html.Events.Extra.Touch.onEnd toTouchMsg
             ]
             [ Svg.svg
                 [ Svg.Attributes.width (String.fromFloat width)
@@ -311,10 +314,7 @@ view { width, height, cameraAngle, cameraPosition, lightPosition } =
                 ]
             ]
         , Html.div
-            [ Html.Events.Extra.Touch.onStart toTouchMsg
-            , Html.Events.Extra.Touch.onMove toTouchMsg
-            , Html.Events.Extra.Touch.onEnd toTouchMsg
-            ]
+            []
             [ Scene3d.custom
                 (let
                     lightPoint =
