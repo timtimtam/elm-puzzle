@@ -7,8 +7,9 @@ import Browser.Dom
 import Browser.Events
 import Browser.Navigation
 import Camera3d
-import Color exposing (Color)
+import Color
 import Cylinder3d
+import Direction2d exposing (Direction2d)
 import Direction3d
 import Direction3dWire
 import Html
@@ -36,6 +37,7 @@ import Svg.Attributes
 import Task
 import Types exposing (ArrowKey(..), ButtonState(..), ContactType(..), FrontendModel, FrontendMsg(..), TouchContact(..))
 import Url
+import Vector2d exposing (Vector2d)
 import Vector3d
 import Viewpoint3d
 
@@ -76,6 +78,7 @@ init _ _ =
       , rightKey = Up
       , upKey = Up
       , downKey = Up
+      , joystickPosition = ( 0, 0 )
       , viewAngleDelta = ( 0, 0 )
       , lightPosition = ( 3, 3, 3 )
       , touches = NotOneFinger
@@ -134,24 +137,9 @@ update msg model =
                                 in
                                 Vector3d.sum
                                     [ positionVector
-                                    , case ( model.upKey, model.downKey ) of
-                                        ( Up, Down ) ->
-                                            Vector3d.multiplyBy -scaledDelta forward
-
-                                        ( Down, Up ) ->
-                                            Vector3d.multiplyBy scaledDelta forward
-
-                                        _ ->
-                                            Vector3d.zero
-                                    , case ( model.leftKey, model.rightKey ) of
-                                        ( Up, Down ) ->
-                                            Vector3d.scaleBy scaledDelta left
-
-                                        ( Down, Up ) ->
-                                            Vector3d.scaleBy -scaledDelta left
-
-                                        _ ->
-                                            Vector3d.zero
+                                    , case model.joystickPosition of
+                                        ( px, py ) ->
+                                            Vector3d.unitless (px / 10) (-py / 10) 0
                                     ]
                                     |> Vector3d.toTuple Quantity.toFloat
 
@@ -203,18 +191,44 @@ update msg model =
             ( { model | mouseButtonState = Up, lastContact = Mouse }, Cmd.none )
 
         ( ArrowKeyChanged key state, _ ) ->
-            case key of
-                UpKey ->
-                    ( { model | upKey = state }, Cmd.none )
+            let
+                newModel =
+                    case key of
+                        UpKey ->
+                            { model | upKey = state }
 
-                DownKey ->
-                    ( { model | downKey = state }, Cmd.none )
+                        DownKey ->
+                            { model | downKey = state }
 
-                LeftKey ->
-                    ( { model | leftKey = state }, Cmd.none )
+                        LeftKey ->
+                            { model | leftKey = state }
 
-                RightKey ->
-                    ( { model | rightKey = state }, Cmd.none )
+                        RightKey ->
+                            { model | rightKey = state }
+
+                newJoystickX =
+                    case ( newModel.leftKey, newModel.rightKey ) of
+                        ( Up, Down ) ->
+                            -1
+
+                        ( Down, Up ) ->
+                            1
+
+                        _ ->
+                            0
+
+                newJoystickY =
+                    case ( newModel.upKey, newModel.downKey ) of
+                        ( Up, Down ) ->
+                            -1
+
+                        ( Down, Up ) ->
+                            1
+
+                        _ ->
+                            0
+            in
+            ( { newModel | joystickPosition = ( newJoystickX, newJoystickY ) }, Cmd.none )
 
         ( TouchesChanged contact, _ ) ->
             let
@@ -240,25 +254,36 @@ update msg model =
 
         ( JoystickTouchChanged contact, _ ) ->
             let
-                zeroDelta =
-                    ( 0, 0 )
+                newJoystickPosition =
+                    case contact of
+                        OneFinger { screenPos } ->
+                            case ( joystickOrigin model.height |> Debug.log "origin", screenPos |> Debug.log "screenpos" ) of
+                                ( ( jx, jy ), ( sx, sy ) ) ->
+                                    let
+                                        newX =
+                                            (sx - jx) / joystickFreedom
 
-                delta =
-                    case ( model.touches, contact ) of
-                        ( OneFinger old, OneFinger new ) ->
-                            if old.identifier == new.identifier then
-                                tupleSubtract new.screenPos old.screenPos
+                                        newY =
+                                            (sy - jy) / joystickFreedom
 
-                            else
-                                zeroDelta
+                                        vector =
+                                            Vector2d.unitless newX newY
+                                    in
+                                    if Quantity.toFloat (Vector2d.length vector) > 1 then
+                                        case Vector2d.direction vector |> Maybe.map Direction2d.unwrap of
+                                            Just { x, y } ->
+                                                ( x, y )
 
-                        _ ->
-                            zeroDelta
+                                            Nothing ->
+                                                ( 0, 0 )
 
-                totalDelta =
-                    tupleAdd delta model.viewAngleDelta
+                                    else
+                                        ( newX, newY )
+
+                        NotOneFinger ->
+                            ( 0, 0 )
             in
-            ( { model | touches = contact, viewAngleDelta = totalDelta, lastContact = Touch }, Cmd.none )
+            ( { model | lastContact = Touch, joystickPosition = newJoystickPosition } |> Debug.log "model", Cmd.none )
 
         ( ShootClicked, _ ) ->
             ( model, Cmd.none )
@@ -279,44 +304,61 @@ tupleAdd a b =
             ( a1 + b1, a2 + b2 )
 
 
-inputsUnchanged : { a | viewAngleDelta : ( Float, Float ), leftKey : ButtonState, rightKey : ButtonState, upKey : ButtonState, downKey : ButtonState } -> Bool
-inputsUnchanged { viewAngleDelta, leftKey, rightKey, upKey, downKey } =
+inputsUnchanged { viewAngleDelta, joystickPosition } =
     (case viewAngleDelta of
         ( dx, dy ) ->
             Basics.abs dx < 0.0001 && Basics.abs dy < 0.0001
     )
-        && (case ( ( leftKey, rightKey ), ( upKey, downKey ) ) of
-                ( ( Up, Up ), ( Up, Up ) ) ->
-                    Basics.True
-
-                _ ->
-                    Basics.False
+        && (case joystickPosition of
+                ( dx, dy ) ->
+                    Basics.abs dx < 0.0001 && Basics.abs dy < 0.0001
            )
 
 
-toTouchMsg : { a | touches : List { b | identifier : Int, screenPos : ( Float, Float ) } } -> TouchContact
 toTouchMsg e =
     case e.touches of
         [ touch ] ->
             OneFinger
                 { identifier = touch.identifier
-                , screenPos = touch.screenPos
+                , screenPos = touch.clientPos
                 }
 
         _ ->
             NotOneFinger
 
 
+joystickOrigin height =
+    ( 130, height - 70 )
+
+
+joystickSize =
+    20
+
+
+joystickFreedom =
+    40
+
+
+shootButtonLocation width height =
+    ( width - 100, height - 200 )
+
+
 view : Model -> Browser.Document FrontendMsg
-view { width, height, cameraAngle, cameraPosition, lightPosition, lastContact } =
+view { width, height, cameraAngle, cameraPosition, lightPosition, lastContact, joystickPosition } =
     { title = "Hello"
     , body =
         [ Html.div
             [ Html.Attributes.style "position" "fixed"
             , Html.Attributes.style "z-index" "2"
-            , Html.Events.Extra.Touch.onStart (\event -> TouchesChanged (toTouchMsg event))
-            , Html.Events.Extra.Touch.onMove (\event -> TouchesChanged (toTouchMsg event))
-            , Html.Events.Extra.Touch.onEnd (\event -> TouchesChanged (toTouchMsg event))
+            , Html.Events.Extra.Touch.onWithOptions "touchstart"
+                { preventDefault = True, stopPropagation = True }
+                (\event -> TouchesChanged (toTouchMsg event))
+            , Html.Events.Extra.Touch.onWithOptions "touchmove"
+                { preventDefault = True, stopPropagation = True }
+                (\event -> TouchesChanged (toTouchMsg event))
+            , Html.Events.Extra.Touch.onWithOptions "touchend"
+                { preventDefault = True, stopPropagation = True }
+                (\event -> TouchesChanged (toTouchMsg event))
             ]
             [ Svg.svg
                 [ Svg.Attributes.width (String.fromFloat width)
@@ -325,32 +367,44 @@ view { width, height, cameraAngle, cameraPosition, lightPosition, lastContact } 
                 ]
                 (case lastContact of
                     Touch ->
-                        [ Svg.circle
-                            [ Svg.Attributes.cx (String.fromFloat 130)
-                            , Svg.Attributes.cy (String.fromFloat (height - 70))
-                            , Svg.Attributes.r (String.fromFloat 20)
-                            , Svg.Attributes.fill (Color.toCssString (Color.fromRgba { red = 0, blue = 0, green = 0, alpha = 0.2 }))
-                            ]
-                            []
-                        , Svg.circle
-                            [ Svg.Attributes.cx (String.fromFloat 130)
-                            , Svg.Attributes.cy (String.fromFloat (height - 70))
-                            , Svg.Attributes.r (String.fromFloat 50)
-                            , Svg.Attributes.fill (Color.toCssString (Color.fromRgba { red = 0, blue = 0, green = 0, alpha = 0.2 }))
-                            , Html.Events.Extra.Touch.onStart (\event -> JoystickTouchChanged (toTouchMsg event))
-                            , Html.Events.Extra.Touch.onMove (\event -> JoystickTouchChanged (toTouchMsg event))
-                            , Html.Events.Extra.Touch.onEnd (\event -> JoystickTouchChanged (toTouchMsg event))
-                            ]
-                            []
-                        , Svg.circle
-                            [ Svg.Attributes.cx (String.fromFloat (width - 100))
-                            , Svg.Attributes.cy (String.fromFloat (height - 200))
-                            , Svg.Attributes.r (String.fromFloat 20)
-                            , Svg.Attributes.fill (Color.toCssString (Color.fromRgba { red = 0, blue = 0, green = 0, alpha = 0.3 }))
-                            , Html.Events.onClick ShootClicked
-                            ]
-                            []
-                        ]
+                        case joystickOrigin height of
+                            ( cx, cy ) ->
+                                [ case joystickPosition of
+                                    ( px, py ) ->
+                                        Svg.circle
+                                            [ Svg.Attributes.cx (String.fromFloat (cx + px * joystickFreedom))
+                                            , Svg.Attributes.cy (String.fromFloat (cy + py * joystickFreedom))
+                                            , Svg.Attributes.r (String.fromFloat joystickSize)
+                                            , Svg.Attributes.fill (Color.toCssString (Color.fromRgba { red = 0, blue = 0, green = 0, alpha = 0.2 }))
+                                            ]
+                                            []
+                                , Svg.circle
+                                    [ Svg.Attributes.cx (String.fromFloat cx)
+                                    , Svg.Attributes.cy (String.fromFloat cy)
+                                    , Svg.Attributes.r (String.fromFloat (joystickFreedom + joystickSize / 2))
+                                    , Svg.Attributes.fill (Color.toCssString (Color.fromRgba { red = 0, blue = 0, green = 0, alpha = 0.2 }))
+                                    , Html.Events.Extra.Touch.onWithOptions "touchstart"
+                                        { preventDefault = True, stopPropagation = True }
+                                        (\event -> JoystickTouchChanged (toTouchMsg event))
+                                    , Html.Events.Extra.Touch.onWithOptions "touchmove"
+                                        { preventDefault = True, stopPropagation = True }
+                                        (\event -> JoystickTouchChanged (toTouchMsg event))
+                                    , Html.Events.Extra.Touch.onWithOptions "touchend"
+                                        { preventDefault = True, stopPropagation = True }
+                                        (\event -> JoystickTouchChanged (toTouchMsg event))
+                                    ]
+                                    []
+                                , case shootButtonLocation width height of
+                                    ( bx, by ) ->
+                                        Svg.circle
+                                            [ Svg.Attributes.cx (String.fromFloat bx)
+                                            , Svg.Attributes.cy (String.fromFloat by)
+                                            , Svg.Attributes.r (String.fromFloat joystickSize)
+                                            , Svg.Attributes.fill (Color.toCssString (Color.fromRgba { red = 0, blue = 0, green = 0, alpha = 0.2 }))
+                                            , Html.Events.onClick ShootClicked
+                                            ]
+                                            []
+                                ]
 
                     Mouse ->
                         []
@@ -428,16 +482,6 @@ lightEntity =
                     100000
                 )
             )
-
-
-joyStick =
-    Sphere3d.atPoint
-        (Point3d.inches 0 0 0)
-        (Length.inches
-            0.01
-        )
-        |> Scene3d.sphere
-            (Scene3d.Material.color Color.lightOrange)
 
 
 worldSize =
