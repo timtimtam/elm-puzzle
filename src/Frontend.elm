@@ -1,7 +1,5 @@
 module Frontend exposing (app)
 
--- import Json.Decode
-
 import Angle
 import Axis3d
 import Browser
@@ -9,11 +7,12 @@ import Browser.Dom
 import Browser.Events
 import Browser.Navigation
 import Camera3d
-import Color
+import Color exposing (Color)
 import Cylinder3d
 import Direction3d
 import Direction3dWire
 import Html
+import Html.Attributes
 import Html.Events.Extra.Touch
 import Illuminance
 import Json.Decode
@@ -31,6 +30,8 @@ import Scene3d
 import Scene3d.Light
 import Scene3d.Material
 import Sphere3d
+import Svg
+import Svg.Attributes
 import Task
 import Types exposing (ArrowKey(..), ButtonState(..), FrontendModel, FrontendMsg(..), TouchContact(..))
 import Url
@@ -74,7 +75,7 @@ init _ _ =
       , rightKey = Up
       , upKey = Up
       , downKey = Up
-      , mouseDelta = ( 0, 0 )
+      , viewAngleDelta = ( 0, 0 )
       , lightPosition = ( 3, 3, 3 )
       , touches = NotOneFinger
       }
@@ -89,54 +90,58 @@ update msg model =
             ( { model | width = w, height = h }, Cmd.none )
 
         ( Tick delta, _ ) ->
-            let
-                scaledDelta =
-                    delta * 0.005
+            if inputsUnchanged model then
+                ( model, Cmd.none )
 
-                cameraUp =
-                    Direction3d.positiveZ
+            else
+                let
+                    scaledDelta =
+                        delta * 0.005
 
-                cameraAngle =
-                    Direction3dWire.toDirection3d model.cameraAngle
+                    cameraUp =
+                        Direction3d.positiveZ
 
-                cameraLeft =
-                    Vector3d.direction
-                        (Vector3d.cross
-                            (Direction3d.toVector cameraUp)
-                            (Direction3d.toVector cameraAngle)
-                        )
-                        |> Maybe.map Direction3d.toVector
+                    cameraAngle =
+                        Direction3dWire.toDirection3d model.cameraAngle
 
-                cameraLeftDirection =
-                    cameraLeft |> Maybe.andThen Vector3d.direction
-
-                newCameraPosition =
-                    -- Move the camera based on the arrow keys
-                    let
-                        positionVector =
-                            Vector3d.fromTuple Quantity.float model.cameraPosition
-
-                        cameraAngleXY =
-                            Direction3d.projectOnto Plane3d.xy (Direction3dWire.toDirection3d model.cameraAngle)
-                    in
-                    case ( cameraAngleXY, cameraLeft ) of
-                        ( Just angleXY, Just left ) ->
-                            let
-                                forward =
-                                    Direction3d.toVector angleXY
-                            in
-                            (case ( model.upKey, model.downKey ) of
-                                ( Up, Down ) ->
-                                    Vector3d.multiplyBy -scaledDelta forward
-
-                                ( Down, Up ) ->
-                                    Vector3d.multiplyBy scaledDelta forward
-
-                                _ ->
-                                    Vector3d.zero
+                    cameraLeft =
+                        Vector3d.direction
+                            (Vector3d.cross
+                                (Direction3d.toVector cameraUp)
+                                (Direction3d.toVector cameraAngle)
                             )
-                                |> Vector3d.plus
-                                    (case ( model.leftKey, model.rightKey ) of
+                            |> Maybe.map Direction3d.toVector
+
+                    cameraLeftDirection =
+                        cameraLeft |> Maybe.andThen Vector3d.direction
+
+                    newCameraPosition =
+                        -- Move the camera based on the arrow keys
+                        let
+                            positionVector =
+                                Vector3d.fromTuple Quantity.float model.cameraPosition
+
+                            cameraAngleXY =
+                                Direction3d.projectOnto Plane3d.xy (Direction3dWire.toDirection3d model.cameraAngle)
+                        in
+                        case ( cameraAngleXY, cameraLeft ) of
+                            ( Just angleXY, Just left ) ->
+                                let
+                                    forward =
+                                        Direction3d.toVector angleXY
+                                in
+                                Vector3d.sum
+                                    [ positionVector
+                                    , case ( model.upKey, model.downKey ) of
+                                        ( Up, Down ) ->
+                                            Vector3d.multiplyBy -scaledDelta forward
+
+                                        ( Down, Up ) ->
+                                            Vector3d.multiplyBy scaledDelta forward
+
+                                        _ ->
+                                            Vector3d.zero
+                                    , case ( model.leftKey, model.rightKey ) of
                                         ( Up, Down ) ->
                                             Vector3d.scaleBy scaledDelta left
 
@@ -145,41 +150,40 @@ update msg model =
 
                                         _ ->
                                             Vector3d.zero
-                                    )
-                                |> Vector3d.plus positionVector
-                                |> Vector3d.toTuple Quantity.toFloat
+                                    ]
+                                    |> Vector3d.toTuple Quantity.toFloat
 
-                        _ ->
-                            model.cameraPosition
+                            _ ->
+                                model.cameraPosition
 
-                newAngle =
-                    case model.mouseDelta of
-                        ( x, y ) ->
-                            case cameraLeftDirection of
-                                Just left ->
-                                    cameraAngle
-                                        |> Direction3d.rotateAround
-                                            (Axis3d.through Point3d.origin cameraUp)
-                                            (Angle.radians (-4 * x / model.width))
-                                        |> Direction3d.rotateAround
-                                            (Axis3d.through Point3d.origin left)
-                                            (Angle.radians (-4 * y / model.height))
+                    newAngle =
+                        case model.viewAngleDelta of
+                            ( x, y ) ->
+                                case cameraLeftDirection of
+                                    Just left ->
+                                        cameraAngle
+                                            |> Direction3d.rotateAround
+                                                (Axis3d.through Point3d.origin cameraUp)
+                                                (Angle.radians (-4 * x / model.width))
+                                            |> Direction3d.rotateAround
+                                                (Axis3d.through Point3d.origin left)
+                                                (Angle.radians (-4 * y / model.height))
 
-                                Nothing ->
-                                    cameraAngle
-            in
-            ( { model
-                | cameraPosition = newCameraPosition
-                , cameraAngle = Direction3dWire.fromDirection3d newAngle
-                , mouseDelta = ( 0, 0 )
-              }
-            , Cmd.none
-            )
+                                    Nothing ->
+                                        cameraAngle
+                in
+                ( { model
+                    | cameraPosition = newCameraPosition
+                    , cameraAngle = Direction3dWire.fromDirection3d newAngle
+                    , viewAngleDelta = ( 0, 0 )
+                  }
+                , Cmd.none
+                )
 
         ( MouseMoved x y, Down ) ->
             ( { model
-                | mouseDelta =
-                    case model.mouseDelta of
+                | viewAngleDelta =
+                    case model.viewAngleDelta of
                         ( a, b ) ->
                             ( a + x, b + y )
               }
@@ -227,9 +231,9 @@ update msg model =
                             zeroDelta
 
                 totalDelta =
-                    tupleAdd delta model.mouseDelta
+                    tupleAdd delta model.viewAngleDelta
             in
-            ( { model | touches = contact, mouseDelta = totalDelta }, Cmd.none )
+            ( { model | touches = contact, viewAngleDelta = totalDelta }, Cmd.none )
 
         ( NoOpFrontendMsg, _ ) ->
             ( model, Cmd.none )
@@ -262,11 +266,51 @@ toTouchMsg e =
         )
 
 
+inputsUnchanged : { a | viewAngleDelta : ( Float, Float ), leftKey : ButtonState, rightKey : ButtonState, upKey : ButtonState, downKey : ButtonState } -> Bool
+inputsUnchanged { viewAngleDelta, leftKey, rightKey, upKey, downKey } =
+    (case viewAngleDelta of
+        ( dx, dy ) ->
+            Basics.abs dx < 0.0001 && Basics.abs dy < 0.0001
+    )
+        && (case ( ( leftKey, rightKey ), ( upKey, downKey ) ) of
+                ( ( Up, Up ), ( Up, Up ) ) ->
+                    Basics.True
+
+                _ ->
+                    Basics.False
+           )
+
+
 view : Model -> Browser.Document FrontendMsg
 view { width, height, cameraAngle, cameraPosition, lightPosition } =
     { title = "Hello"
     , body =
         [ Html.div
+            [ Html.Attributes.style "position" "fixed"
+            , Html.Attributes.style "z-index" "2"
+            ]
+            [ Svg.svg
+                [ Svg.Attributes.width (String.fromFloat width)
+                , Svg.Attributes.height (String.fromFloat height)
+                , Svg.Attributes.viewBox ("0 0 " ++ String.fromFloat width ++ " " ++ String.fromFloat height)
+                ]
+                [ Svg.circle
+                    [ Svg.Attributes.cx (String.fromFloat 100)
+                    , Svg.Attributes.cy (String.fromFloat (height - 100))
+                    , Svg.Attributes.r (String.fromFloat 20)
+                    , Svg.Attributes.fill (Color.toCssString (Color.fromRgba { red = 0, blue = 0, green = 0, alpha = 0.2 }))
+                    ]
+                    []
+                , Svg.circle
+                    [ Svg.Attributes.cx (String.fromFloat 100)
+                    , Svg.Attributes.cy (String.fromFloat (height - 100))
+                    , Svg.Attributes.r (String.fromFloat 50)
+                    , Svg.Attributes.fill (Color.toCssString (Color.fromRgba { red = 0, blue = 0, green = 0, alpha = 0.2 }))
+                    ]
+                    []
+                ]
+            ]
+        , Html.div
             [ Html.Events.Extra.Touch.onStart toTouchMsg
             , Html.Events.Extra.Touch.onMove toTouchMsg
             , Html.Events.Extra.Touch.onEnd toTouchMsg
@@ -299,7 +343,11 @@ view { width, height, cameraAngle, cameraPosition, lightPosition } =
                                     Viewpoint3d.lookAt
                                         { eyePoint =
                                             Point3d.inches x y z
-                                        , focalPoint = Point3d.translateIn (Direction3dWire.toDirection3d cameraAngle) (Quantity.Quantity 1) (Point3d.inches x y z)
+                                        , focalPoint =
+                                            Point3d.translateIn
+                                                (Direction3dWire.toDirection3d cameraAngle)
+                                                (Quantity.Quantity 1)
+                                                (Point3d.inches x y z)
                                         , upDirection = Direction3d.positiveZ
                                         }
                         , verticalFieldOfView = Angle.degrees 45
@@ -312,7 +360,11 @@ view { width, height, cameraAngle, cameraPosition, lightPosition } =
                  , dimensions = ( Pixels.int (round width), Pixels.int (round height) )
                  , background = Scene3d.backgroundColor (Color.fromRgba { red = 0.17, green = 0.17, blue = 0.19, alpha = 1 })
                  , entities =
-                    (lightEntity |> Scene3d.translateBy (Vector3d.fromTuple Length.inches lightPosition)) :: staticEntities
+                    List.concat
+                        [ [ lightEntity |> Scene3d.translateBy (Vector3d.fromTuple Length.inches lightPosition)
+                          ]
+                        , staticEntities
+                        ]
                  }
                 )
             ]
@@ -333,6 +385,16 @@ lightEntity =
                     100000
                 )
             )
+
+
+joyStick =
+    Sphere3d.atPoint
+        (Point3d.inches 0 0 0)
+        (Length.inches
+            0.01
+        )
+        |> Scene3d.sphere
+            (Scene3d.Material.color Color.lightOrange)
 
 
 worldSize =

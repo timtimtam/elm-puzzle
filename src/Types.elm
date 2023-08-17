@@ -20,13 +20,13 @@ type TouchContact
 type alias FrontendModel =
     { width : Float
     , height : Float
-    , mouseDelta : ( Float, Float )
+    , cameraAngle : Direction3dWire RealWorldCoordinates
+    , cameraPosition : ( Float, Float, Float )
+    , viewAngleDelta : ( Float, Float )
     , leftKey : ButtonState
     , rightKey : ButtonState
     , upKey : ButtonState
     , downKey : ButtonState
-    , cameraAngle : Direction3dWire RealWorldCoordinates
-    , cameraPosition : ( Float, Float, Float )
     , mouseButtonState : ButtonState
     , touches : TouchContact
     , lightPosition : ( Float, Float, Float )
