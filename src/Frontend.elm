@@ -209,10 +209,10 @@ update msg model =
                 newJoystickX =
                     case ( newModel.leftKey, newModel.rightKey ) of
                         ( Up, Down ) ->
-                            -1
+                            1
 
                         ( Down, Up ) ->
-                            1
+                            -1
 
                         _ ->
                             0
