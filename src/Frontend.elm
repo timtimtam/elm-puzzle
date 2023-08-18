@@ -166,7 +166,7 @@ update msg model =
                                         (\leftDirection forwardDirection ->
                                             Vector3d.plus
                                                 (leftDirection |> Vector3d.withLength (Quantity.multiplyBy px unitDistance))
-                                                (forwardDirection |> Vector3d.withLength (Quantity.multiplyBy py unitDistance))
+                                                (forwardDirection |> Vector3d.withLength (Quantity.multiplyBy -py unitDistance))
                                         )
                                         (Frame3d.xDirection playerFrame |> Direction3d.projectOnto Plane3d.xy)
                                         (Frame3d.yDirection playerFrame |> Direction3d.projectOnto Plane3d.xy)
@@ -178,15 +178,12 @@ update msg model =
 
                                 ( dx, dy ) =
                                     model.viewAngleDelta
-                                        |> Debug.log "newAngle"
 
                                 newAngle =
                                     playerFrame
-                                        |> Debug.log "frame"
                                         |> Frame3d.rotateAroundOwn Frame3d.zAxis (Angle.radians (-4.0 * dx / model.width))
                                         |> Frame3d.rotateAroundOwn Frame3d.xAxis (Angle.radians (-4.0 * dy / model.height))
                                         |> Frame3d.yDirection
-                                        |> Debug.log "newAngle"
                             in
                             ( { model
                                 | cameraPosition = newCameraPosition
@@ -248,10 +245,10 @@ update msg model =
                 newJoystickY =
                     case ( newModel.upKey, newModel.downKey ) of
                         ( Up, Down ) ->
-                            -1
+                            1
 
                         ( Down, Up ) ->
-                            1
+                            -1
 
                         _ ->
                             0
