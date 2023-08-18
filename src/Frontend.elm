@@ -9,9 +9,11 @@ import Browser.Navigation
 import Camera3d
 import Color
 import Cylinder3d
-import Direction2d exposing (Direction2d)
+import Direction2d
 import Direction3d
 import Direction3dWire
+import Duration
+import Frame3d
 import Html
 import Html.Attributes
 import Html.Events
@@ -25,19 +27,19 @@ import Length
 import Luminance
 import LuminousFlux
 import Pixels
-import Plane3d
 import Point3d
 import Quantity
 import Scene3d
 import Scene3d.Light
 import Scene3d.Material
+import Speed
 import Sphere3d
 import Svg
 import Svg.Attributes
 import Task
-import Types exposing (ArrowKey(..), ButtonState(..), ContactType(..), FrontendModel, FrontendMsg(..), TouchContact(..))
+import Types exposing (ArrowKey(..), ButtonState(..), ContactType(..), FrontendModel, FrontendMsg(..), RealWorldCoordinates, TouchContact(..))
 import Url
-import Vector2d exposing (Vector2d)
+import Vector2d
 import Vector3d
 import Viewpoint3d
 
@@ -88,20 +90,55 @@ init _ _ =
     )
 
 
+type PlayerCoordinates
+    = PlayerCoordinates
+
+
+cameraFrame3d :
+    Point3d.Point3d Length.Meters RealWorldCoordinates
+    -> Direction3d.Direction3d RealWorldCoordinates
+    -> Maybe (Frame3d.Frame3d Length.Meters RealWorldCoordinates { defines : PlayerCoordinates })
+cameraFrame3d position angle =
+    let
+        globalUp =
+            Direction3d.toVector Direction3d.positiveZ
+
+        globalforward =
+            Direction3d.toVector angle
+
+        globalLeft =
+            Vector3d.cross globalUp globalforward
+    in
+    Direction3d.orthonormalize globalUp globalforward globalLeft
+        |> Maybe.map
+            (\( playerUp, playerForward, playerLeft ) ->
+                Frame3d.unsafe
+                    { originPoint = position
+                    , xDirection = playerLeft
+                    , yDirection = playerForward
+                    , zDirection = playerUp
+                    }
+            )
+
+
+playerSpeed =
+    Speed.metersPerSecond 10
+
+
 update : FrontendMsg -> Model -> ( Model, Cmd msg )
 update msg model =
     case ( msg, model.mouseButtonState ) of
         ( WindowResized w h, _ ) ->
             ( { model | width = w, height = h }, Cmd.none )
 
-        ( Tick delta, _ ) ->
+        ( Tick tickMilliseconds, _ ) ->
             if inputsUnchanged model then
                 ( model, Cmd.none )
 
             else
                 let
-                    scaledDelta =
-                        delta * 0.005
+                    tickDuration =
+                        Duration.milliseconds tickMilliseconds
 
                     cameraUp =
                         Direction3d.positiveZ
@@ -121,29 +158,39 @@ update msg model =
                         cameraLeft |> Maybe.andThen Vector3d.direction
 
                     newCameraPosition =
-                        -- Move the camera based on the arrow keys
                         let
-                            positionVector =
-                                Vector3d.fromTuple Quantity.float model.cameraPosition
+                            ( x, y, z ) =
+                                model.cameraPosition
 
-                            cameraAngleXY =
-                                Direction3d.projectOnto Plane3d.xy (Direction3dWire.toDirection3d model.cameraAngle)
+                            positionPoint =
+                                Point3d.meters x y z
                         in
-                        case ( cameraAngleXY, cameraLeft ) of
-                            ( Just angleXY, Just left ) ->
-                                let
-                                    forward =
-                                        Direction3d.toVector angleXY
-                                in
-                                Vector3d.sum
-                                    [ positionVector
-                                    , case model.joystickPosition of
-                                        ( px, py ) ->
-                                            Vector3d.unitless (px / 10) (-py / 10) 0
-                                    ]
-                                    |> Vector3d.toTuple Quantity.toFloat
+                        cameraFrame3d positionPoint cameraAngle
+                            |> Maybe.map
+                                (\playerFrame ->
+                                    let
+                                        ( px, py ) =
+                                            model.joystickPosition
 
-                            _ ->
+                                        unitDistance =
+                                            Quantity.for tickDuration playerSpeed
+
+                                        localMovement =
+                                            Vector3d.xyz
+                                                (Quantity.multiplyBy px unitDistance)
+                                                (Quantity.multiplyBy py unitDistance)
+                                                Quantity.zero
+
+                                        globalMovement =
+                                            Vector3d.placeIn playerFrame localMovement
+                                    in
+                                    Vector3d.sum
+                                        [ positionPoint |> Point3d.toRecord Length.inMeters |> Vector3d.fromRecord Length.meters
+                                        , globalMovement
+                                        ]
+                                        |> Vector3d.toTuple Length.inMeters
+                                )
+                            |> Maybe.withDefault
                                 model.cameraPosition
 
                     newAngle =
@@ -220,10 +267,10 @@ update msg model =
                 newJoystickY =
                     case ( newModel.upKey, newModel.downKey ) of
                         ( Up, Down ) ->
-                            1
+                            -1
 
                         ( Down, Up ) ->
-                            -1
+                            1
 
                         _ ->
                             0
