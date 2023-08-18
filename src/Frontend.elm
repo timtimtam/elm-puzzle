@@ -27,6 +27,7 @@ import Length
 import Luminance
 import LuminousFlux
 import Pixels
+import Plane3d
 import Point3d
 import Quantity
 import Scene3d
@@ -109,9 +110,9 @@ cameraFrame3d position angle =
         globalLeft =
             Vector3d.cross globalUp globalforward
     in
-    Direction3d.orthonormalize globalUp globalforward globalLeft
+    Direction3d.orthonormalize globalforward globalUp globalLeft
         |> Maybe.map
-            (\( playerUp, playerForward, playerLeft ) ->
+            (\( playerForward, playerUp, playerLeft ) ->
                 Frame3d.unsafe
                     { originPoint = position
                     , xDirection = playerLeft
@@ -140,82 +141,62 @@ update msg model =
                     tickDuration =
                         Duration.milliseconds tickMilliseconds
 
-                    cameraUp =
-                        Direction3d.positiveZ
+                    ( x, y, z ) =
+                        model.cameraPosition
+
+                    positionPoint =
+                        Point3d.meters x y z
 
                     cameraAngle =
                         Direction3dWire.toDirection3d model.cameraAngle
-
-                    cameraLeft =
-                        Vector3d.direction
-                            (Vector3d.cross
-                                (Direction3d.toVector cameraUp)
-                                (Direction3d.toVector cameraAngle)
-                            )
-                            |> Maybe.map Direction3d.toVector
-
-                    cameraLeftDirection =
-                        cameraLeft |> Maybe.andThen Vector3d.direction
-
-                    newCameraPosition =
-                        let
-                            ( x, y, z ) =
-                                model.cameraPosition
-
-                            positionPoint =
-                                Point3d.meters x y z
-                        in
-                        cameraFrame3d positionPoint cameraAngle
-                            |> Maybe.map
-                                (\playerFrame ->
+                in
+                cameraFrame3d positionPoint cameraAngle
+                    |> Maybe.map
+                        (\playerFrame ->
+                            let
+                                newCameraPosition =
                                     let
                                         ( px, py ) =
                                             model.joystickPosition
 
                                         unitDistance =
                                             Quantity.for tickDuration playerSpeed
-
-                                        localMovement =
-                                            Vector3d.xyz
-                                                (Quantity.multiplyBy px unitDistance)
-                                                (Quantity.multiplyBy py unitDistance)
-                                                Quantity.zero
-
-                                        globalMovement =
-                                            Vector3d.placeIn playerFrame localMovement
                                     in
-                                    Vector3d.sum
-                                        [ positionPoint |> Point3d.toRecord Length.inMeters |> Vector3d.fromRecord Length.meters
-                                        , globalMovement
-                                        ]
-                                        |> Vector3d.toTuple Length.inMeters
-                                )
-                            |> Maybe.withDefault
-                                model.cameraPosition
+                                    Maybe.map2
+                                        (\leftDirection forwardDirection ->
+                                            Vector3d.plus
+                                                (leftDirection |> Vector3d.withLength (Quantity.multiplyBy px unitDistance))
+                                                (forwardDirection |> Vector3d.withLength (Quantity.multiplyBy py unitDistance))
+                                        )
+                                        (Frame3d.xDirection playerFrame |> Direction3d.projectOnto Plane3d.xy)
+                                        (Frame3d.yDirection playerFrame |> Direction3d.projectOnto Plane3d.xy)
+                                        |> Maybe.map
+                                            (\movement ->
+                                                positionPoint |> Point3d.translateBy movement |> Point3d.toTuple Length.inMeters
+                                            )
+                                        |> Maybe.withDefault model.cameraPosition
 
-                    newAngle =
-                        case model.viewAngleDelta of
-                            ( x, y ) ->
-                                case cameraLeftDirection of
-                                    Just left ->
-                                        cameraAngle
-                                            |> Direction3d.rotateAround
-                                                (Axis3d.through Point3d.origin cameraUp)
-                                                (Angle.radians (-4 * x / model.width))
-                                            |> Direction3d.rotateAround
-                                                (Axis3d.through Point3d.origin left)
-                                                (Angle.radians (-4 * y / model.height))
+                                ( dx, dy ) =
+                                    model.viewAngleDelta
+                                        |> Debug.log "newAngle"
 
-                                    Nothing ->
-                                        cameraAngle
-                in
-                ( { model
-                    | cameraPosition = newCameraPosition
-                    , cameraAngle = Direction3dWire.fromDirection3d newAngle
-                    , viewAngleDelta = ( 0, 0 )
-                  }
-                , Cmd.none
-                )
+                                newAngle =
+                                    playerFrame
+                                        |> Debug.log "frame"
+                                        |> Frame3d.rotateAroundOwn Frame3d.zAxis (Angle.radians (-4.0 * dx / model.width))
+                                        |> Frame3d.rotateAroundOwn Frame3d.xAxis (Angle.radians (-4.0 * dy / model.height))
+                                        |> Frame3d.yDirection
+                                        |> Debug.log "newAngle"
+                            in
+                            ( { model
+                                | cameraPosition = newCameraPosition
+                                , cameraAngle = Direction3dWire.fromDirection3d newAngle
+                                , viewAngleDelta = ( 0, 0 )
+                              }
+                            , Cmd.none
+                            )
+                        )
+                    |> Maybe.withDefault ( model, Cmd.none )
 
         ( MouseMoved x y, Down ) ->
             ( { model
