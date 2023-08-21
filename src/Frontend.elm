@@ -1,4 +1,4 @@
-module Frontend exposing (app)
+port module Frontend exposing (app)
 
 import Angle
 import Axis3d
@@ -21,9 +21,11 @@ import Html.Events.Extra.Mouse
 import Html.Events.Extra.Touch
 import Illuminance
 import Json.Decode
+import Json.Encode
 import Keyboard.Event
 import Keyboard.Key
 import Lamdera
+import Lamdera.Json as Json
 import Length
 import Luminance
 import LuminousFlux
@@ -40,7 +42,7 @@ import Sphere3d
 import Svg
 import Svg.Attributes
 import Task
-import Types exposing (ArrowKey(..), ButtonState(..), ContactType(..), FrontendModel, FrontendMsg(..), RealWorldCoordinates, TouchContact(..))
+import Types exposing (..)
 import Url
 import Vector2d
 import Vector3d
@@ -88,6 +90,7 @@ init _ _ =
       , lightPosition = ( 3, 3, 3 )
       , touches = NotOneFinger
       , lastContact = Mouse
+      , pointerCapture = PointerNotLocked
       }
     , Task.attempt handleResult Browser.Dom.getViewport
     )
@@ -130,7 +133,7 @@ playerSpeed =
 
 update : FrontendMsg -> Model -> ( Model, Cmd msg )
 update msg model =
-    case ( msg, model.mouseButtonState ) of
+    case ( msg, model.pointerCapture ) of
         ( WindowResized w h, _ ) ->
             ( { model | width = w, height = h }, Cmd.none )
 
@@ -183,8 +186,8 @@ update msg model =
 
                                 newAngle =
                                     playerFrame
-                                        |> Frame3d.rotateAroundOwn Frame3d.zAxis (Angle.radians (-4.0 * dx / model.width))
-                                        |> Frame3d.rotateAroundOwn Frame3d.xAxis (Angle.radians (-4.0 * dy / model.height))
+                                        |> Frame3d.rotateAroundOwn Frame3d.zAxis (Angle.radians (-0.004 * dx))
+                                        |> Frame3d.rotateAroundOwn Frame3d.xAxis (Angle.radians (-0.004 * dy))
                                         |> Frame3d.yDirection
                             in
                             ( { model
@@ -197,7 +200,7 @@ update msg model =
                         )
                     |> Maybe.withDefault ( model, Cmd.none )
 
-        ( MouseMoved x y, Down ) ->
+        ( MouseMoved x y, PointerLocked ) ->
             ( { model
                 | viewAngleDelta =
                     case model.viewAngleDelta of
@@ -209,10 +212,12 @@ update msg model =
             )
 
         ( MouseMoved _ _, _ ) ->
-            ( model, Cmd.none )
+            ( model
+            , Cmd.none
+            )
 
         ( MouseDown, _ ) ->
-            ( { model | mouseButtonState = Down, lastContact = Mouse }, Cmd.none )
+            ( { model | mouseButtonState = Down, lastContact = Mouse }, pointerLock Json.Encode.null )
 
         ( MouseUp, _ ) ->
             ( { model | mouseButtonState = Up, lastContact = Mouse }, Cmd.none )
@@ -323,6 +328,12 @@ update msg model =
         ( ShootClicked, _ ) ->
             ( model, Cmd.none )
 
+        ( GotPointerLock, _ ) ->
+            ( { model | pointerCapture = PointerLocked }, Cmd.none )
+
+        ( LostPointerLock, _ ) ->
+            ( { model | pointerCapture = PointerNotLocked }, Cmd.none )
+
         ( NoOpFrontendMsg, _ ) ->
             ( model, Cmd.none )
 
@@ -380,7 +391,7 @@ shootButtonLocation width height =
 
 
 view : Model -> Browser.Document FrontendMsg
-view { width, height, cameraAngle, cameraPosition, lightPosition, lastContact, joystickPosition, mouseButtonState } =
+view { width, height, cameraAngle, cameraPosition, lightPosition, lastContact, joystickPosition, pointerCapture } =
     { title = "Hello"
     , body =
         [ Html.div
@@ -440,13 +451,14 @@ view { width, height, cameraAngle, cameraPosition, lightPosition, lastContact, j
                 )
             ]
         , Html.div
-            [ Html.Attributes.style "position" "fixed"
+            [ Html.Attributes.id "overlay-div"
+            , Html.Attributes.style "position" "fixed"
             , Html.Events.custom "mousemove"
-                (case mouseButtonState of
-                    Up ->
-                        Json.Decode.fail "Mouse is not down"
+                (case pointerCapture of
+                    PointerNotLocked ->
+                        Json.Decode.fail "Mouse is not captured"
 
-                    Down ->
+                    PointerLocked ->
                         Json.Decode.map2
                             (\a b -> { message = MouseMoved a b, preventDefault = True, stopPropagation = False })
                             (Json.Decode.field "movementX" Json.Decode.float)
@@ -619,4 +631,25 @@ subscriptions model =
             (\milliseconds ->
                 Tick milliseconds
             )
+        , gotPointerLock
+            (\value ->
+                case value |> Json.decodeValue (Json.Decode.field "msg" Json.Decode.string) of
+                    Ok "GotPointerLock" ->
+                        GotPointerLock
+
+                    Ok "LostPointerLock" ->
+                        LostPointerLock
+
+                    Ok _ ->
+                        NoOpFrontendMsg
+
+                    Err _ ->
+                        NoOpFrontendMsg
+            )
         ]
+
+
+port pointerLock : Json.Encode.Value -> Cmd msg
+
+
+port gotPointerLock : (Json.Decode.Value -> msg) -> Sub msg

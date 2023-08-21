@@ -1,6 +1,10 @@
-module Types exposing (..)
+module Evergreen.V21.Types exposing (..)
 
-import Direction3dWire exposing (Direction3dWire)
+import Evergreen.V21.Direction3dWire
+
+
+type RealWorldCoordinates
+    = RealWorldCoordinates
 
 
 type ButtonState
@@ -8,13 +12,17 @@ type ButtonState
     | Down
 
 
-type RealWorldCoordinates
-    = RealWorldCoordinates
-
-
 type TouchContact
-    = OneFinger { identifier : Int, screenPos : ( Float, Float ) }
+    = OneFinger
+        { identifier : Int
+        , screenPos : ( Float, Float )
+        }
     | NotOneFinger
+
+
+type ContactType
+    = Touch
+    | Mouse
 
 
 type PointerCapture
@@ -25,7 +33,7 @@ type PointerCapture
 type alias FrontendModel =
     { width : Float
     , height : Float
-    , cameraAngle : Direction3dWire RealWorldCoordinates
+    , cameraAngle : Evergreen.V21.Direction3dWire.Direction3dWire RealWorldCoordinates
     , cameraPosition : ( Float, Float, Float )
     , viewAngleDelta : ( Float, Float )
     , leftKey : ButtonState
@@ -39,11 +47,6 @@ type alias FrontendModel =
     , lastContact : ContactType
     , pointerCapture : PointerCapture
     }
-
-
-type ContactType
-    = Touch
-    | Mouse
 
 
 type alias BackendModel =
