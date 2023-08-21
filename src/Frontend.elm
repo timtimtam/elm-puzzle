@@ -17,6 +17,7 @@ import Frame3d
 import Html
 import Html.Attributes
 import Html.Events
+import Html.Events.Extra.Mouse
 import Html.Events.Extra.Touch
 import Illuminance
 import Json.Decode
@@ -28,6 +29,7 @@ import Luminance
 import LuminousFlux
 import Pixels
 import Plane3d
+import Point2d
 import Point3d
 import Quantity
 import Scene3d
@@ -252,8 +254,16 @@ update msg model =
 
                         _ ->
                             0
+
+                newXY =
+                    case Direction2d.from Point2d.origin (Point2d.fromUnitless { x = newJoystickX, y = newJoystickY }) of
+                        Just direction ->
+                            direction |> Direction2d.toVector |> Vector2d.toTuple Quantity.toFloat
+
+                        Nothing ->
+                            ( 0, 0 )
             in
-            ( { newModel | joystickPosition = ( newJoystickX, newJoystickY ) }, Cmd.none )
+            ( { newModel | joystickPosition = newXY }, Cmd.none )
 
         ( TouchesChanged contact, _ ) ->
             let
@@ -370,12 +380,80 @@ shootButtonLocation width height =
 
 
 view : Model -> Browser.Document FrontendMsg
-view { width, height, cameraAngle, cameraPosition, lightPosition, lastContact, joystickPosition } =
+view { width, height, cameraAngle, cameraPosition, lightPosition, lastContact, joystickPosition, mouseButtonState } =
     { title = "Hello"
     , body =
         [ Html.div
             [ Html.Attributes.style "position" "fixed"
-            , Html.Attributes.style "z-index" "2"
+            ]
+            [ Scene3d.custom
+                (let
+                    lightPoint =
+                        case lightPosition of
+                            ( x, y, z ) ->
+                                Point3d.inches x y z
+                 in
+                 { lights =
+                    Scene3d.twoLights
+                        (Scene3d.Light.point (Scene3d.Light.castsShadows True)
+                            { chromaticity = Scene3d.Light.incandescent
+                            , intensity = LuminousFlux.lumens 50000
+                            , position = lightPoint
+                            }
+                        )
+                        (Scene3d.Light.ambient
+                            { chromaticity = Scene3d.Light.incandescent
+                            , intensity = Illuminance.lux 30000
+                            }
+                        )
+                 , camera =
+                    Camera3d.perspective
+                        { viewpoint =
+                            case cameraPosition of
+                                ( x, y, z ) ->
+                                    Viewpoint3d.lookAt
+                                        { eyePoint =
+                                            Point3d.inches x y z
+                                        , focalPoint =
+                                            Point3d.translateIn
+                                                (Direction3dWire.toDirection3d cameraAngle)
+                                                (Quantity.Quantity 1)
+                                                (Point3d.inches x y z)
+                                        , upDirection = Direction3d.positiveZ
+                                        }
+                        , verticalFieldOfView = Angle.degrees 45
+                        }
+                 , clipDepth = Length.centimeters 0.5
+                 , exposure = Scene3d.exposureValue 15
+                 , toneMapping = Scene3d.hableFilmicToneMapping
+                 , whiteBalance = Scene3d.Light.incandescent
+                 , antialiasing = Scene3d.multisampling
+                 , dimensions = ( Pixels.int (round width), Pixels.int (round height) )
+                 , background = Scene3d.backgroundColor (Color.fromRgba { red = 0.17, green = 0.17, blue = 0.19, alpha = 1 })
+                 , entities =
+                    List.concat
+                        [ [ lightEntity |> Scene3d.translateBy (Vector3d.fromTuple Length.inches lightPosition)
+                          ]
+                        , staticEntities
+                        ]
+                 }
+                )
+            ]
+        , Html.div
+            [ Html.Attributes.style "position" "fixed"
+            , Html.Events.custom "mousemove"
+                (case mouseButtonState of
+                    Up ->
+                        Json.Decode.fail "Mouse is not down"
+
+                    Down ->
+                        Json.Decode.map2
+                            (\a b -> { message = MouseMoved a b, preventDefault = True, stopPropagation = False })
+                            (Json.Decode.field "movementX" Json.Decode.float)
+                            (Json.Decode.field "movementY" Json.Decode.float)
+                )
+            , Html.Events.onMouseDown MouseDown
+            , Html.Events.onMouseUp MouseUp
             , Html.Events.Extra.Touch.onWithOptions "touchstart"
                 { preventDefault = True, stopPropagation = True }
                 (\event -> TouchesChanged (toTouchMsg event))
@@ -434,61 +512,6 @@ view { width, height, cameraAngle, cameraPosition, lightPosition, lastContact, j
 
                     Mouse ->
                         []
-                )
-            ]
-        , Html.div
-            []
-            [ Scene3d.custom
-                (let
-                    lightPoint =
-                        case lightPosition of
-                            ( x, y, z ) ->
-                                Point3d.inches x y z
-                 in
-                 { lights =
-                    Scene3d.twoLights
-                        (Scene3d.Light.point (Scene3d.Light.castsShadows True)
-                            { chromaticity = Scene3d.Light.incandescent
-                            , intensity = LuminousFlux.lumens 50000
-                            , position = lightPoint
-                            }
-                        )
-                        (Scene3d.Light.ambient
-                            { chromaticity = Scene3d.Light.incandescent
-                            , intensity = Illuminance.lux 30000
-                            }
-                        )
-                 , camera =
-                    Camera3d.perspective
-                        { viewpoint =
-                            case cameraPosition of
-                                ( x, y, z ) ->
-                                    Viewpoint3d.lookAt
-                                        { eyePoint =
-                                            Point3d.inches x y z
-                                        , focalPoint =
-                                            Point3d.translateIn
-                                                (Direction3dWire.toDirection3d cameraAngle)
-                                                (Quantity.Quantity 1)
-                                                (Point3d.inches x y z)
-                                        , upDirection = Direction3d.positiveZ
-                                        }
-                        , verticalFieldOfView = Angle.degrees 45
-                        }
-                 , clipDepth = Length.centimeters 0.5
-                 , exposure = Scene3d.exposureValue 15
-                 , toneMapping = Scene3d.hableFilmicToneMapping
-                 , whiteBalance = Scene3d.Light.incandescent
-                 , antialiasing = Scene3d.multisampling
-                 , dimensions = ( Pixels.int (round width), Pixels.int (round height) )
-                 , background = Scene3d.backgroundColor (Color.fromRgba { red = 0.17, green = 0.17, blue = 0.19, alpha = 1 })
-                 , entities =
-                    List.concat
-                        [ [ lightEntity |> Scene3d.translateBy (Vector3d.fromTuple Length.inches lightPosition)
-                          ]
-                        , staticEntities
-                        ]
-                 }
                 )
             ]
         ]
@@ -584,19 +607,6 @@ subscriptions : Model -> Sub FrontendMsg
 subscriptions model =
     Sub.batch
         [ Browser.Events.onResize (\x y -> WindowResized (toFloat x) (toFloat y))
-        , Browser.Events.onMouseMove
-            (case model.mouseButtonState of
-                Up ->
-                    Json.Decode.fail "Mouse is not down"
-
-                Down ->
-                    Json.Decode.map2
-                        MouseMoved
-                        (Json.Decode.field "movementX" Json.Decode.float)
-                        (Json.Decode.field "movementY" Json.Decode.float)
-            )
-        , Browser.Events.onMouseDown (Json.Decode.succeed MouseDown)
-        , Browser.Events.onMouseUp (Json.Decode.succeed MouseUp)
         , Browser.Events.onKeyDown
             (Keyboard.Event.considerKeyboardEvent
                 (\event -> Maybe.map (\key -> ArrowKeyChanged key Down) (handleArrowKey event))
