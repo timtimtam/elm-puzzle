@@ -448,6 +448,18 @@ view { width, height, cameraAngle, lightPosition, lastContact, joystickPosition,
             List.Extra.find
                 (\body -> (Physics.Body.data body).bodyType == Player)
                 (world |> Physics.World.bodies)
+
+        joystickVector =
+            joystickPosition |> Vector2d.fromRecord Quantity.float
+
+        joystickCapped =
+            (if joystickVector |> Vector2d.length |> Quantity.greaterThan (Quantity.float 1) then
+                Vector2d.normalize joystickVector
+
+             else
+                joystickVector
+            )
+                |> Vector2d.toRecord Quantity.toFloat
     in
     { title = "elm-ball"
     , body =
@@ -502,12 +514,12 @@ view { width, height, cameraAngle, lightPosition, lastContact, joystickPosition,
                 , Svg.Attributes.viewBox ("0 0 " ++ String.fromFloat width ++ " " ++ String.fromFloat height)
                 ]
                 (case lastContact of
-                    _ ->
+                    Touch ->
                         case joystickOrigin height of
                             ( cx, cy ) ->
                                 [ Svg.circle
-                                    [ Svg.Attributes.cx (String.fromFloat (cx + joystickPosition.x * joystickFreedom))
-                                    , Svg.Attributes.cy (String.fromFloat (cy + joystickPosition.y * joystickFreedom))
+                                    [ Svg.Attributes.cx (String.fromFloat (cx + joystickCapped.x * joystickFreedom))
+                                    , Svg.Attributes.cy (String.fromFloat (cy + joystickCapped.y * joystickFreedom))
                                     , Svg.Attributes.r (String.fromFloat joystickSize)
                                     , Svg.Attributes.fill (Color.toCssString (Color.fromRgba { red = 0, blue = 0, green = 0, alpha = 0.2 }))
                                     ]
@@ -540,8 +552,9 @@ view { width, height, cameraAngle, lightPosition, lastContact, joystickPosition,
                                             []
                                 , crossHair width height
                                 ]
-                 -- Mouse ->
-                 --     [ crossHair width height ]
+
+                    Mouse ->
+                        [ crossHair width height ]
                 )
             ]
         ]
