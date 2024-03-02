@@ -198,7 +198,7 @@ update msg model =
                             newAngle =
                                 frame
                                     |> Frame3d.rotateAroundOwn Frame3d.zAxis (Angle.radians (rightPixels * radiansPerPixel))
-                                    |> Frame3d.rotateAroundOwn Frame3d.xAxis (Angle.radians (upPixels * radiansPerPixel))
+                                    |> Frame3d.rotateAroundOwn Frame3d.xAxis (Angle.radians (-upPixels * radiansPerPixel))
                                     |> Frame3d.yDirection
                         in
                         ( { model
