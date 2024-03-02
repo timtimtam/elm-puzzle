@@ -20,7 +20,7 @@ exports.init = async function (app) {
     }
   }
 
-  app.ports.pointerLock.subscribe(function (integer) {
+  app.ports.requestPointerLock.subscribe(function (integer) {
     targetDiv.requestPointerLock({
       unadjustedMovement: true,
     });
