@@ -29,12 +29,13 @@ type PointerCapture
 
 
 type BodyType
-    = NotPlayer
+    = Static
+    | Dynamic
     | Player
 
 
 type alias WorldData =
-    { bodyType : BodyType }
+    BodyType
 
 
 type FrontendModel

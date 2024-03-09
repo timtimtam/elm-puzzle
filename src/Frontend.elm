@@ -345,23 +345,23 @@ baseWorld =
         |> Physics.World.add
             (Physics.Body.sphere
                 (Sphere3d.atOrigin (Length.inches 1))
-                { bodyType = Player }
+                Player
                 |> Physics.Body.moveTo (Point3d.inches 0 0 5)
                 |> Physics.Body.withBehavior (Physics.Body.dynamic (Mass.kilograms 1))
-                |> Physics.Body.withMaterial (Physics.Material.custom { friction = 0.3, bounciness = 0.9 })
+                |> Physics.Body.withMaterial (Physics.Material.custom { friction = 0, bounciness = 0.9 })
                 |> Physics.Body.withDamping { linear = 0.8, angular = 0.8 }
             )
         |> Physics.World.add
             (Physics.Body.sphere
-                (Sphere3d.atOrigin (Length.inches 1))
-                { bodyType = NotPlayer }
+                (Sphere3d.atOrigin (Length.inches 2))
+                Dynamic
                 |> Physics.Body.moveTo (Point3d.inches 10 0 5)
                 |> Physics.Body.withBehavior (Physics.Body.dynamic (Mass.kilograms 5))
-                |> Physics.Body.withMaterial (Physics.Material.custom { friction = 0.3, bounciness = 0.9 })
-                |> Physics.Body.withDamping { linear = 0.8, angular = 0.8 }
+                |> Physics.Body.withMaterial (Physics.Material.custom { friction = 0, bounciness = 0 })
+                |> Physics.Body.withDamping { linear = 0.2, angular = 0.2 }
             )
         |> Physics.World.add
-            (Physics.Body.plane { bodyType = NotPlayer }
+            (Physics.Body.plane Static
                 |> Physics.Body.moveTo (Point3d.meters 0 0 0)
             )
 
@@ -428,11 +428,14 @@ simulate { joystick, facingAngle } duration world =
                 |> Vector2d.mirrorAcross Axis2d.x
                 |> Vector2d.rotateBy facingAngle
                 |> Vector2d.rotateBy (Angle.turns 0.25)
+
+        newtons =
+            joystickCapped |> Vector2d.length |> Quantity.toFloat |> Force.newtons
     in
     world
         |> Physics.World.update
             (\body ->
-                case (Physics.Body.data body).bodyType of
+                case Physics.Body.data body of
                     Player ->
                         let
                             direction =
@@ -446,7 +449,7 @@ simulate { joystick, facingAngle } duration world =
                         in
                         body
                             |> Physics.Body.applyForce
-                                (joystickCapped |> Vector2d.length |> Quantity.toFloat |> Force.newtons)
+                                newtons
                                 direction
                                 (Physics.Body.originPoint body)
 
@@ -518,7 +521,12 @@ view model =
             let
                 playerBody =
                     List.Extra.find
-                        (\body -> (Physics.Body.data body).bodyType == Player)
+                        (\body -> Physics.Body.data body == Player)
+                        (world |> Physics.World.bodies)
+
+                otherBody =
+                    List.Extra.find
+                        (\body -> Physics.Body.data body == Dynamic)
                         (world |> Physics.World.bodies)
 
                 joystickVector =
@@ -542,12 +550,19 @@ view model =
                         { material =
                             Scene3d.Material.texturedPbr
                                 { baseColor = colorTexture
-                                , roughness = roughnessTexture
-                                , metallic = roughnessTexture
+                                , roughness = Scene3d.Material.constant 0
+                                , metallic = Scene3d.Material.constant 0
                                 }
                         , lightPosition = lightPosition
                         , ballFrame =
                             case playerBody of
+                                Just body ->
+                                    Physics.Body.frame body
+
+                                Nothing ->
+                                    Frame3d.atOrigin
+                        , obstacleFrame =
+                            case otherBody of
                                 Just body ->
                                     Physics.Body.frame body
 
@@ -665,7 +680,7 @@ view model =
             }
 
 
-renderScene { material, ballFrame, lightPosition, cameraAngle, width, height } =
+renderScene { material, ballFrame, obstacleFrame, lightPosition, cameraAngle, width, height } =
     Scene3d.custom
         (let
             lightPoint =
@@ -723,6 +738,9 @@ renderScene { material, ballFrame, lightPosition, cameraAngle, width, height } =
                 , [ Sphere3d.atOrigin (Length.inches 1)
                         |> Scene3d.sphereWithShadow material
                         |> Scene3d.placeIn ballFrame
+                  , Sphere3d.atOrigin (Length.inches 2)
+                        |> Scene3d.sphereWithShadow material
+                        |> Scene3d.placeIn obstacleFrame
                   ]
                 ]
          }
