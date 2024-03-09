@@ -1,5 +1,6 @@
 module Internal.Transform3d exposing
-    ( Transform3d
+    ( Orientation3d(..)
+    , Transform3d(..)
     , atOrigin
     , atPoint
     , directionPlaceIn

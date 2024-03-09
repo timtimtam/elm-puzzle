@@ -1,4 +1,4 @@
-module Physics.Coordinates exposing (WorldCoordinates, BodyCoordinates)
+module Physics.Coordinates exposing (WorldCoordinates(..), BodyCoordinates(..))
 
 {-| These type parameters indicate coordinate systems.
 

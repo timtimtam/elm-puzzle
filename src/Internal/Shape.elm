@@ -1,5 +1,5 @@
 module Internal.Shape exposing
-    ( CenterOfMassCoordinates
+    ( CenterOfMassCoordinates(..)
     , Protected(..)
     , Shape(..)
     , centerOfMass
