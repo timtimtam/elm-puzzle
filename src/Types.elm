@@ -1,17 +1,17 @@
 module Types exposing (..)
 
+import Color
 import Direction3dWire exposing (Direction3dWire)
-import Physics.Body exposing (velocity)
+import Physics.Body
+import Physics.Coordinates
 import Physics.World
+import Scene3d.Material
+import WebGL.Texture
 
 
 type ButtonState
     = Up
     | Down
-
-
-type RealWorldCoordinates
-    = RealWorldCoordinates
 
 
 type ScreenCoordinates
@@ -37,23 +37,31 @@ type alias WorldData =
     { bodyType : BodyType }
 
 
-type alias FrontendModel =
-    { width : Float
-    , height : Float
-    , cameraAngle : Direction3dWire RealWorldCoordinates
-    , leftKey : ButtonState
-    , rightKey : ButtonState
-    , upKey : ButtonState
-    , downKey : ButtonState
-    , mouseButtonState : ButtonState
-    , touches : TouchContact
-    , world : Physics.World.World WorldData
-    , joystickPosition : { x : Float, y : Float }
-    , viewAngleDelta : ( Float, Float )
-    , lightPosition : ( Float, Float, Float )
-    , lastContact : ContactType
-    , pointerCapture : PointerCapture
-    }
+type FrontendModel
+    = Loading
+        { colorTexture : Maybe (Scene3d.Material.Texture Color.Color)
+        , roughnessTexture : Maybe (Scene3d.Material.Texture Float)
+        }
+    | Loaded
+        { colorTexture : Scene3d.Material.Texture Color.Color
+        , roughnessTexture : Scene3d.Material.Texture Float
+        , width : Float
+        , height : Float
+        , cameraAngle : Direction3dWire Physics.Coordinates.WorldCoordinates
+        , leftKey : ButtonState
+        , rightKey : ButtonState
+        , upKey : ButtonState
+        , downKey : ButtonState
+        , mouseButtonState : ButtonState
+        , touches : TouchContact
+        , world : Physics.World.World WorldData
+        , joystickPosition : { x : Float, y : Float }
+        , viewAngleDelta : ( Float, Float )
+        , lightPosition : ( Float, Float, Float )
+        , lastContact : ContactType
+        , pointerCapture : PointerCapture
+        }
+    | Errored String
 
 
 type ContactType
@@ -86,6 +94,8 @@ type FrontendMsg
     | ShootClicked
     | GotPointerLock
     | LostPointerLock
+    | GotColorTexture (Result WebGL.Texture.Error (Scene3d.Material.Texture Color.Color))
+    | GotRoughnessTexture (Result WebGL.Texture.Error (Scene3d.Material.Texture Float))
     | NoOpFrontendMsg
 
 

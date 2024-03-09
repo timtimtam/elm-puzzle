@@ -36,6 +36,7 @@ import Luminance
 import LuminousFlux
 import Mass
 import Physics.Body
+import Physics.Coordinates
 import Physics.Material
 import Physics.World
 import Pixels
@@ -44,7 +45,6 @@ import Platform.Cmd as Cmd
 import Point2d
 import Point3d
 import Quantity
-import Review.Fix exposing (Problem(..))
 import Scene3d
 import Scene3d.Light
 import Scene3d.Material
@@ -77,60 +77,28 @@ app =
         }
 
 
+handleResult v =
+    case v of
+        Err _ ->
+            NoOpFrontendMsg
+
+        Ok vp ->
+            WindowResized vp.scene.width vp.scene.height
+
+
 init : Url.Url -> Browser.Navigation.Key -> ( Model, Cmd FrontendMsg )
 init _ _ =
-    let
-        handleResult v =
-            case v of
-                Err _ ->
-                    NoOpFrontendMsg
-
-                Ok vp ->
-                    WindowResized vp.scene.width vp.scene.height
-    in
-    ( { width = 0
-      , height = 0
-      , cameraAngle = Direction3dWire.fromDirection3d (Maybe.withDefault Direction3d.positiveX (Direction3d.from (Point3d.inches 0 0 0) (Point3d.inches 5 -4 2)))
-      , mouseButtonState = Up
-      , leftKey = Up
-      , rightKey = Up
-      , upKey = Up
-      , downKey = Up
-      , joystickPosition = { x = 0, y = 0 }
-      , viewAngleDelta = ( 0, 0 )
-      , lightPosition = ( 3, 3, 3 )
-      , touches = NotOneFinger
-      , lastContact = Mouse
-      , pointerCapture = PointerNotLocked
-      , world =
-            Physics.World.empty
-                |> Physics.World.withGravity
-                    (Acceleration.metersPerSecondSquared 9.80665)
-                    Direction3d.negativeZ
-                |> Physics.World.add
-                    (Physics.Body.sphere
-                        (Sphere3d.atOrigin (Length.inches 1))
-                        { bodyType = Player }
-                        |> Physics.Body.moveTo (Point3d.inches 0 0 5)
-                        |> Physics.Body.withBehavior (Physics.Body.dynamic (Mass.kilograms 1))
-                        |> Physics.Body.withMaterial (Physics.Material.custom { friction = 0.3, bounciness = 0.9 })
-                        |> Physics.Body.withDamping { linear = 0.8, angular = 0.8 }
-                    )
-                |> Physics.World.add
-                    (Physics.Body.sphere
-                        (Sphere3d.atOrigin (Length.inches 1))
-                        { bodyType = NotPlayer }
-                        |> Physics.Body.moveTo (Point3d.inches 10 0 5)
-                        |> Physics.Body.withBehavior (Physics.Body.dynamic (Mass.kilograms 5))
-                        |> Physics.Body.withMaterial (Physics.Material.custom { friction = 0.3, bounciness = 0.9 })
-                        |> Physics.Body.withDamping { linear = 0.8, angular = 0.8 }
-                    )
-                |> Physics.World.add
-                    (Physics.Body.plane { bodyType = NotPlayer }
-                        |> Physics.Body.moveTo (Point3d.meters 0 0 0)
-                    )
-      }
-    , Task.attempt handleResult Browser.Dom.getViewport
+    ( Loading
+        { colorTexture = Nothing
+        , roughnessTexture = Nothing
+        }
+    , Cmd.batch
+        [ Task.attempt handleResult Browser.Dom.getViewport
+        , Scene3d.Material.load "https://ianmackenzie.github.io/elm-3d-scene/examples/leather/Leather11_col.jpg"
+            |> Task.attempt GotColorTexture
+        , Scene3d.Material.load "https://ianmackenzie.github.io/elm-3d-scene/examples/leather/Leather11_rgh.jpg"
+            |> Task.attempt GotRoughnessTexture
+        ]
     )
 
 
@@ -143,9 +111,9 @@ radiansPerPixel =
 
 
 cameraFrame3d :
-    Point3d.Point3d Length.Meters RealWorldCoordinates
-    -> Direction3d.Direction3d RealWorldCoordinates
-    -> Maybe (Frame3d.Frame3d Length.Meters RealWorldCoordinates { defines : PlayerCoordinates })
+    Point3d.Point3d Length.Meters Physics.Coordinates.WorldCoordinates
+    -> Direction3d.Direction3d Physics.Coordinates.WorldCoordinates
+    -> Maybe (Frame3d.Frame3d Length.Meters Physics.Coordinates.WorldCoordinates { defines : PlayerCoordinates })
 cameraFrame3d position angle =
     let
         globalUp =
@@ -170,169 +138,264 @@ cameraFrame3d position angle =
 
 
 update : FrontendMsg -> Model -> ( Model, Cmd msg )
-update msg model =
-    case ( msg, model.pointerCapture ) of
-        ( WindowResized w h, _ ) ->
-            ( { model | width = w, height = h }, Cmd.none )
+update msg loadingModel =
+    case loadingModel of
+        Loading textures ->
+            ( case msg of
+                GotColorTexture (Ok colorTexture) ->
+                    checkIfLoaded { textures | colorTexture = Just colorTexture }
 
-        ( Tick tickMilliseconds, _ ) ->
-            let
-                ( rightPixels, upPixels ) =
-                    model.viewAngleDelta
+                GotRoughnessTexture (Ok roughnessTexture) ->
+                    checkIfLoaded { textures | roughnessTexture = Just roughnessTexture }
 
-                world =
-                    simulate
-                        { joystick = Vector2d.unitless model.joystickPosition.x model.joystickPosition.y
-                        , facingAngle =
-                            model.cameraAngle
-                                |> Direction3dWire.toDirection3d
-                                |> Direction3d.azimuthIn SketchPlane3d.xy
-                        }
-                        (Duration.milliseconds tickMilliseconds)
-                        model.world
-            in
-            cameraFrame3d Point3d.origin (model.cameraAngle |> Direction3dWire.toDirection3d)
-                |> Maybe.map
-                    (\frame ->
-                        let
-                            newAngle =
-                                frame
-                                    |> Frame3d.rotateAroundOwn Frame3d.zAxis (Angle.radians (rightPixels * radiansPerPixel))
-                                    |> Frame3d.rotateAroundOwn Frame3d.xAxis (Angle.radians (-upPixels * radiansPerPixel))
-                                    |> Frame3d.yDirection
-                        in
-                        ( { model
-                            | world = world
-                            , viewAngleDelta = ( 0, 0 )
-                            , cameraAngle = newAngle |> Direction3dWire.fromDirection3d
-                          }
-                        , Cmd.none
-                        )
+                GotColorTexture (Err _) ->
+                    Errored "Error loading color texture"
+
+                GotRoughnessTexture (Err _) ->
+                    Errored "Error loading roughness texture"
+
+                _ ->
+                    Loading textures
+            , Cmd.none
+            )
+
+        Loaded model ->
+            (case msg of
+                WindowResized w h ->
+                    ( { model | width = w, height = h }, Cmd.none )
+
+                Tick tickMilliseconds ->
+                    let
+                        ( rightPixels, upPixels ) =
+                            model.viewAngleDelta
+
+                        world =
+                            simulate
+                                { joystick = Vector2d.unitless model.joystickPosition.x model.joystickPosition.y
+                                , facingAngle =
+                                    model.cameraAngle
+                                        |> Direction3dWire.toDirection3d
+                                        |> Direction3d.azimuthIn SketchPlane3d.xy
+                                }
+                                (Duration.milliseconds tickMilliseconds)
+                                model.world
+                    in
+                    cameraFrame3d Point3d.origin (model.cameraAngle |> Direction3dWire.toDirection3d)
+                        |> Maybe.map
+                            (\frame ->
+                                let
+                                    newAngle =
+                                        frame
+                                            |> Frame3d.rotateAroundOwn Frame3d.zAxis (Angle.radians (rightPixels * radiansPerPixel))
+                                            |> Frame3d.rotateAroundOwn Frame3d.xAxis (Angle.radians (-upPixels * radiansPerPixel))
+                                            |> Frame3d.yDirection
+                                in
+                                ( { model
+                                    | world = world
+                                    , viewAngleDelta = ( 0, 0 )
+                                    , cameraAngle = newAngle |> Direction3dWire.fromDirection3d
+                                  }
+                                , Cmd.none
+                                )
+                            )
+                        |> Maybe.withDefault ( model, Cmd.none )
+
+                MouseMoved x y ->
+                    ( { model
+                        | viewAngleDelta =
+                            case model.pointerCapture of
+                                PointerLocked ->
+                                    let
+                                        ( a, b ) =
+                                            model.viewAngleDelta
+                                    in
+                                    ( a + x, b + y )
+
+                                PointerNotLocked ->
+                                    model.viewAngleDelta
+                        , lastContact = Mouse
+                      }
+                    , Cmd.none
                     )
-                |> Maybe.withDefault ( model, Cmd.none )
 
-        ( MouseMoved x y, PointerLocked ) ->
-            ( { model
-                | viewAngleDelta =
-                    case model.viewAngleDelta of
-                        ( a, b ) ->
-                            ( a + x, b + y )
+                MouseDown ->
+                    ( { model | mouseButtonState = Down, lastContact = Mouse }, requestPointerLock Json.Encode.null )
+
+                MouseUp ->
+                    ( { model | mouseButtonState = Up, lastContact = Mouse }, Cmd.none )
+
+                ArrowKeyChanged key state ->
+                    let
+                        newModel =
+                            case key of
+                                UpKey ->
+                                    { model | upKey = state }
+
+                                DownKey ->
+                                    { model | downKey = state }
+
+                                LeftKey ->
+                                    { model | leftKey = state }
+
+                                RightKey ->
+                                    { model | rightKey = state }
+
+                        newJoystickX =
+                            case ( newModel.leftKey, newModel.rightKey ) of
+                                ( Up, Down ) ->
+                                    1
+
+                                ( Down, Up ) ->
+                                    -1
+
+                                _ ->
+                                    0
+
+                        newJoystickY =
+                            case ( newModel.upKey, newModel.downKey ) of
+                                ( Up, Down ) ->
+                                    1
+
+                                ( Down, Up ) ->
+                                    -1
+
+                                _ ->
+                                    0
+
+                        newXY =
+                            case Direction2d.from Point2d.origin (Point2d.fromUnitless { x = newJoystickX, y = newJoystickY }) of
+                                Just direction ->
+                                    direction |> Direction2d.toVector |> Vector2d.toRecord Quantity.toFloat
+
+                                Nothing ->
+                                    { x = 0, y = 0 }
+                    in
+                    ( { newModel | joystickPosition = newXY }, Cmd.none )
+
+                TouchesChanged contact ->
+                    let
+                        zeroDelta =
+                            ( 0, 0 )
+
+                        delta =
+                            case ( model.touches, contact ) of
+                                ( OneFinger old, OneFinger new ) ->
+                                    if old.identifier == new.identifier then
+                                        tupleSubtract new.screenPos old.screenPos
+
+                                    else
+                                        zeroDelta
+
+                                _ ->
+                                    zeroDelta
+
+                        totalDelta =
+                            tupleAdd delta model.viewAngleDelta
+                    in
+                    ( { model | touches = contact, viewAngleDelta = totalDelta, lastContact = Touch }, Cmd.none )
+
+                JoystickTouchChanged contact ->
+                    let
+                        newJoystickPosition =
+                            case contact of
+                                OneFinger { screenPos } ->
+                                    case ( joystickOrigin model.height, screenPos ) of
+                                        ( ( jx, jy ), ( sx, sy ) ) ->
+                                            { x = (sx - jx) / joystickFreedom, y = (sy - jy) / joystickFreedom }
+
+                                NotOneFinger ->
+                                    { x = 0, y = 0 }
+                    in
+                    ( { model | lastContact = Touch, joystickPosition = newJoystickPosition }, Cmd.none )
+
+                ShootClicked ->
+                    ( model, Cmd.none )
+
+                GotPointerLock ->
+                    ( { model | pointerCapture = PointerLocked }, Cmd.none )
+
+                LostPointerLock ->
+                    ( { model | pointerCapture = PointerNotLocked }, Cmd.none )
+
+                GotColorTexture _ ->
+                    ( model, Cmd.none )
+
+                GotRoughnessTexture _ ->
+                    ( model, Cmd.none )
+
+                NoOpFrontendMsg ->
+                    ( model, Cmd.none )
+            )
+                |> (\( subModel, cmd ) -> ( Loaded subModel, cmd ))
+
+        Errored error ->
+            ( Errored error, Cmd.none )
+
+
+baseWorld =
+    Physics.World.empty
+        |> Physics.World.withGravity
+            (Acceleration.metersPerSecondSquared 9.80665)
+            Direction3d.negativeZ
+        |> Physics.World.add
+            (Physics.Body.sphere
+                (Sphere3d.atOrigin (Length.inches 1))
+                { bodyType = Player }
+                |> Physics.Body.moveTo (Point3d.inches 0 0 5)
+                |> Physics.Body.withBehavior (Physics.Body.dynamic (Mass.kilograms 1))
+                |> Physics.Body.withMaterial (Physics.Material.custom { friction = 0.3, bounciness = 0.9 })
+                |> Physics.Body.withDamping { linear = 0.8, angular = 0.8 }
+            )
+        |> Physics.World.add
+            (Physics.Body.sphere
+                (Sphere3d.atOrigin (Length.inches 1))
+                { bodyType = NotPlayer }
+                |> Physics.Body.moveTo (Point3d.inches 10 0 5)
+                |> Physics.Body.withBehavior (Physics.Body.dynamic (Mass.kilograms 5))
+                |> Physics.Body.withMaterial (Physics.Material.custom { friction = 0.3, bounciness = 0.9 })
+                |> Physics.Body.withDamping { linear = 0.8, angular = 0.8 }
+            )
+        |> Physics.World.add
+            (Physics.Body.plane { bodyType = NotPlayer }
+                |> Physics.Body.moveTo (Point3d.meters 0 0 0)
+            )
+
+
+checkIfLoaded :
+    { colorTexture : Maybe (Scene3d.Material.Texture Color.Color)
+    , roughnessTexture : Maybe (Scene3d.Material.Texture Float)
+    }
+    -> Model
+checkIfLoaded textures =
+    case ( textures.colorTexture, textures.roughnessTexture ) of
+        ( Just colorTexture, Just roughnessTexture ) ->
+            Loaded
+                { colorTexture = colorTexture
+                , roughnessTexture = roughnessTexture
+                , width = 0
+                , height = 0
+                , cameraAngle = Direction3dWire.fromDirection3d (Maybe.withDefault Direction3d.positiveX (Direction3d.from (Point3d.inches 0 0 0) (Point3d.inches 5 -4 2)))
+                , mouseButtonState = Up
+                , leftKey = Up
+                , rightKey = Up
+                , upKey = Up
+                , downKey = Up
+                , joystickPosition = { x = 0, y = 0 }
+                , viewAngleDelta = ( 0, 0 )
+                , lightPosition = ( 3, 3, 3 )
+                , touches = NotOneFinger
                 , lastContact = Mouse
-              }
-            , Cmd.none
-            )
+                , pointerCapture = PointerNotLocked
+                , world = baseWorld
+                }
 
-        ( MouseMoved _ _, _ ) ->
-            ( model
-            , Cmd.none
-            )
-
-        ( MouseDown, _ ) ->
-            ( { model | mouseButtonState = Down, lastContact = Mouse }, requestPointerLock Json.Encode.null )
-
-        ( MouseUp, _ ) ->
-            ( { model | mouseButtonState = Up, lastContact = Mouse }, Cmd.none )
-
-        ( ArrowKeyChanged key state, _ ) ->
-            let
-                newModel =
-                    case key of
-                        UpKey ->
-                            { model | upKey = state }
-
-                        DownKey ->
-                            { model | downKey = state }
-
-                        LeftKey ->
-                            { model | leftKey = state }
-
-                        RightKey ->
-                            { model | rightKey = state }
-
-                newJoystickX =
-                    case ( newModel.leftKey, newModel.rightKey ) of
-                        ( Up, Down ) ->
-                            1
-
-                        ( Down, Up ) ->
-                            -1
-
-                        _ ->
-                            0
-
-                newJoystickY =
-                    case ( newModel.upKey, newModel.downKey ) of
-                        ( Up, Down ) ->
-                            1
-
-                        ( Down, Up ) ->
-                            -1
-
-                        _ ->
-                            0
-
-                newXY =
-                    case Direction2d.from Point2d.origin (Point2d.fromUnitless { x = newJoystickX, y = newJoystickY }) of
-                        Just direction ->
-                            direction |> Direction2d.toVector |> Vector2d.toRecord Quantity.toFloat
-
-                        Nothing ->
-                            { x = 0, y = 0 }
-            in
-            ( { newModel | joystickPosition = newXY }, Cmd.none )
-
-        ( TouchesChanged contact, _ ) ->
-            let
-                zeroDelta =
-                    ( 0, 0 )
-
-                delta =
-                    case ( model.touches, contact ) of
-                        ( OneFinger old, OneFinger new ) ->
-                            if old.identifier == new.identifier then
-                                tupleSubtract new.screenPos old.screenPos
-
-                            else
-                                zeroDelta
-
-                        _ ->
-                            zeroDelta
-
-                totalDelta =
-                    tupleAdd delta model.viewAngleDelta
-            in
-            ( { model | touches = contact, viewAngleDelta = totalDelta, lastContact = Touch }, Cmd.none )
-
-        ( JoystickTouchChanged contact, _ ) ->
-            let
-                newJoystickPosition =
-                    case contact of
-                        OneFinger { screenPos } ->
-                            case ( joystickOrigin model.height, screenPos ) of
-                                ( ( jx, jy ), ( sx, sy ) ) ->
-                                    { x = (sx - jx) / joystickFreedom, y = (sy - jy) / joystickFreedom }
-
-                        NotOneFinger ->
-                            { x = 0, y = 0 }
-            in
-            ( { model | lastContact = Touch, joystickPosition = newJoystickPosition }, Cmd.none )
-
-        ( ShootClicked, _ ) ->
-            ( model, Cmd.none )
-
-        ( GotPointerLock, _ ) ->
-            ( { model | pointerCapture = PointerLocked }, Cmd.none )
-
-        ( LostPointerLock, _ ) ->
-            ( { model | pointerCapture = PointerNotLocked }, Cmd.none )
-
-        ( NoOpFrontendMsg, _ ) ->
-            ( model, Cmd.none )
+        _ ->
+            Loading textures
 
 
 updateFromBackend msg model =
     case msg of
-        FromBackendTick players ->
+        FromBackendTick _ ->
             ( model, Cmd.none )
 
         NoOpToFrontend ->
@@ -442,126 +505,160 @@ crossHair width height =
 
 
 view : Model -> Browser.Document FrontendMsg
-view { width, height, cameraAngle, lightPosition, lastContact, joystickPosition, pointerCapture, world } =
-    let
-        playerBody =
-            List.Extra.find
-                (\body -> (Physics.Body.data body).bodyType == Player)
-                (world |> Physics.World.bodies)
+view model =
+    case model of
+        Loaded { colorTexture, roughnessTexture, width, height, cameraAngle, lightPosition, lastContact, joystickPosition, pointerCapture, world } ->
+            let
+                playerBody =
+                    List.Extra.find
+                        (\body -> (Physics.Body.data body).bodyType == Player)
+                        (world |> Physics.World.bodies)
 
-        joystickVector =
-            joystickPosition |> Vector2d.fromRecord Quantity.float
+                joystickVector =
+                    joystickPosition |> Vector2d.fromRecord Quantity.float
 
-        joystickCapped =
-            (if joystickVector |> Vector2d.length |> Quantity.greaterThan (Quantity.float 1) then
-                Vector2d.normalize joystickVector
+                joystickCapped =
+                    (if joystickVector |> Vector2d.length |> Quantity.greaterThan (Quantity.float 1) then
+                        Vector2d.normalize joystickVector
 
-             else
-                joystickVector
-            )
-                |> Vector2d.toRecord Quantity.toFloat
-    in
-    { title = "elm-ball"
-    , body =
-        [ Html.div
-            [ Html.Attributes.style "position" "fixed"
-            ]
-            [ Html.Lazy.lazy renderScene
-                { lightPosition = lightPosition
-                , cameraPosition =
-                    case playerBody of
-                        Just body ->
-                            Physics.Body.frame body
-                                |> Frame3d.originPoint
-                                |> Point3d.toTuple Length.inInches
+                     else
+                        joystickVector
+                    )
+                        |> Vector2d.toRecord Quantity.toFloat
+            in
+            { title = "elm-ball"
+            , body =
+                [ Html.div
+                    [ Html.Attributes.style "position" "fixed"
+                    ]
+                    [ Html.Lazy.lazy renderScene
+                        { material =
+                            Scene3d.Material.texturedPbr
+                                { baseColor = colorTexture
+                                , roughness = roughnessTexture
+                                , metallic = Scene3d.Material.constant 0
+                                }
+                        , lightPosition = lightPosition
+                        , ballFrame =
+                            case playerBody of
+                                Just body ->
+                                    Physics.Body.frame body
 
-                        _ ->
-                            ( 0, 0, 0 )
-                , cameraAngle = cameraAngle
-                , width = width
-                , height = height
-                }
-            ]
-        , Html.div
-            [ Html.Attributes.id "overlay-div"
-            , Html.Attributes.style "position" "fixed"
-            , Html.Events.custom "mousemove"
-                (case pointerCapture of
-                    PointerNotLocked ->
-                        Json.Decode.fail "Mouse is not captured"
+                                Nothing ->
+                                    Frame3d.atOrigin
+                        , cameraAngle = cameraAngle
+                        , width = width
+                        , height = height
+                        }
+                    ]
+                , Html.div
+                    [ Html.Attributes.id "overlay-div"
+                    , Html.Attributes.style "position" "fixed"
+                    , Html.Events.custom "mousemove"
+                        (case pointerCapture of
+                            PointerNotLocked ->
+                                Json.Decode.fail "Mouse is not captured"
 
-                    PointerLocked ->
-                        Json.Decode.map2
-                            (\a b -> { message = MouseMoved a b, preventDefault = True, stopPropagation = False })
-                            (Json.Decode.field "movementX" Json.Decode.float)
-                            (Json.Decode.field "movementY" Json.Decode.float)
-                )
-            , Html.Events.onMouseDown MouseDown
-            , Html.Events.onMouseUp MouseUp
-            , Html.Events.Extra.Touch.onWithOptions "touchstart"
-                { preventDefault = True, stopPropagation = True }
-                (\event -> TouchesChanged (toTouchMsg event))
-            , Html.Events.Extra.Touch.onWithOptions "touchmove"
-                { preventDefault = True, stopPropagation = True }
-                (\event -> TouchesChanged (toTouchMsg event))
-            , Html.Events.Extra.Touch.onWithOptions "touchend"
-                { preventDefault = True, stopPropagation = True }
-                (\event -> TouchesChanged (toTouchMsg event))
-            ]
-            [ Svg.svg
-                [ Svg.Attributes.width (String.fromFloat width)
-                , Svg.Attributes.height (String.fromFloat height)
-                , Svg.Attributes.viewBox ("0 0 " ++ String.fromFloat width ++ " " ++ String.fromFloat height)
-                ]
-                (case lastContact of
-                    Touch ->
-                        case joystickOrigin height of
-                            ( cx, cy ) ->
-                                [ Svg.circle
-                                    [ Svg.Attributes.cx (String.fromFloat (cx + joystickCapped.x * joystickFreedom))
-                                    , Svg.Attributes.cy (String.fromFloat (cy + joystickCapped.y * joystickFreedom))
-                                    , Svg.Attributes.r (String.fromFloat joystickSize)
-                                    , Svg.Attributes.fill (Color.toCssString (Color.fromRgba { red = 0, blue = 0, green = 0, alpha = 0.2 }))
-                                    ]
-                                    []
-                                , Svg.circle
-                                    [ Svg.Attributes.cx (String.fromFloat cx)
-                                    , Svg.Attributes.cy (String.fromFloat cy)
-                                    , Svg.Attributes.r (String.fromFloat (joystickFreedom + joystickSize / 2))
-                                    , Svg.Attributes.fill (Color.toCssString (Color.fromRgba { red = 0, blue = 0, green = 0, alpha = 0.2 }))
-                                    , Html.Events.Extra.Touch.onWithOptions "touchstart"
-                                        { preventDefault = True, stopPropagation = True }
-                                        (\event -> JoystickTouchChanged (toTouchMsg event))
-                                    , Html.Events.Extra.Touch.onWithOptions "touchmove"
-                                        { preventDefault = True, stopPropagation = True }
-                                        (\event -> JoystickTouchChanged (toTouchMsg event))
-                                    , Html.Events.Extra.Touch.onWithOptions "touchend"
-                                        { preventDefault = True, stopPropagation = True }
-                                        (\event -> JoystickTouchChanged (toTouchMsg event))
-                                    ]
-                                    []
-                                , case shootButtonLocation width height of
-                                    ( bx, by ) ->
-                                        Svg.circle
-                                            [ Svg.Attributes.cx (String.fromFloat bx)
-                                            , Svg.Attributes.cy (String.fromFloat by)
+                            PointerLocked ->
+                                Json.Decode.map2
+                                    (\a b -> { message = MouseMoved a b, preventDefault = True, stopPropagation = False })
+                                    (Json.Decode.field "movementX" Json.Decode.float)
+                                    (Json.Decode.field "movementY" Json.Decode.float)
+                        )
+                    , Html.Events.onMouseDown MouseDown
+                    , Html.Events.onMouseUp MouseUp
+                    , Html.Events.Extra.Touch.onWithOptions "touchstart"
+                        { preventDefault = True, stopPropagation = True }
+                        (\event -> TouchesChanged (toTouchMsg event))
+                    , Html.Events.Extra.Touch.onWithOptions "touchmove"
+                        { preventDefault = True, stopPropagation = True }
+                        (\event -> TouchesChanged (toTouchMsg event))
+                    , Html.Events.Extra.Touch.onWithOptions "touchend"
+                        { preventDefault = True, stopPropagation = True }
+                        (\event -> TouchesChanged (toTouchMsg event))
+                    ]
+                    [ Svg.svg
+                        [ Svg.Attributes.width (String.fromFloat width)
+                        , Svg.Attributes.height (String.fromFloat height)
+                        , Svg.Attributes.viewBox ("0 0 " ++ String.fromFloat width ++ " " ++ String.fromFloat height)
+                        ]
+                        (case lastContact of
+                            Touch ->
+                                case joystickOrigin height of
+                                    ( cx, cy ) ->
+                                        [ Svg.circle
+                                            [ Svg.Attributes.cx (String.fromFloat (cx + joystickCapped.x * joystickFreedom))
+                                            , Svg.Attributes.cy (String.fromFloat (cy + joystickCapped.y * joystickFreedom))
                                             , Svg.Attributes.r (String.fromFloat joystickSize)
                                             , Svg.Attributes.fill (Color.toCssString (Color.fromRgba { red = 0, blue = 0, green = 0, alpha = 0.2 }))
-                                            , Html.Events.onClick ShootClicked
                                             ]
                                             []
-                                , crossHair width height
-                                ]
+                                        , Svg.circle
+                                            [ Svg.Attributes.cx (String.fromFloat cx)
+                                            , Svg.Attributes.cy (String.fromFloat cy)
+                                            , Svg.Attributes.r (String.fromFloat (joystickFreedom + joystickSize / 2))
+                                            , Svg.Attributes.fill (Color.toCssString (Color.fromRgba { red = 0, blue = 0, green = 0, alpha = 0.2 }))
+                                            , Html.Events.Extra.Touch.onWithOptions "touchstart"
+                                                { preventDefault = True, stopPropagation = True }
+                                                (\event -> JoystickTouchChanged (toTouchMsg event))
+                                            , Html.Events.Extra.Touch.onWithOptions "touchmove"
+                                                { preventDefault = True, stopPropagation = True }
+                                                (\event -> JoystickTouchChanged (toTouchMsg event))
+                                            , Html.Events.Extra.Touch.onWithOptions "touchend"
+                                                { preventDefault = True, stopPropagation = True }
+                                                (\event -> JoystickTouchChanged (toTouchMsg event))
+                                            ]
+                                            []
+                                        , case shootButtonLocation width height of
+                                            ( bx, by ) ->
+                                                Svg.circle
+                                                    [ Svg.Attributes.cx (String.fromFloat bx)
+                                                    , Svg.Attributes.cy (String.fromFloat by)
+                                                    , Svg.Attributes.r (String.fromFloat joystickSize)
+                                                    , Svg.Attributes.fill (Color.toCssString (Color.fromRgba { red = 0, blue = 0, green = 0, alpha = 0.2 }))
+                                                    , Html.Events.onClick ShootClicked
+                                                    ]
+                                                    []
+                                        , crossHair width height
+                                        ]
 
-                    Mouse ->
-                        [ crossHair width height ]
-                )
-            ]
-        ]
-    }
+                            Mouse ->
+                                [ crossHair width height ]
+                        )
+                    ]
+                ]
+            }
+
+        Loading _ ->
+            { title = "elm-ball"
+            , body =
+                [ Html.div
+                    [ Html.Attributes.style "position" "fixed"
+                    ]
+                    []
+                , Html.div
+                    [ Html.Attributes.id "overlay-div"
+                    ]
+                    [ Html.text "Loading..." ]
+                ]
+            }
+
+        Errored error ->
+            { title = "elm-ball"
+            , body =
+                [ Html.div
+                    [ Html.Attributes.style "position" "fixed"
+                    ]
+                    []
+                , Html.div
+                    [ Html.Attributes.id "overlay-div"
+                    ]
+                    [ Html.text ("Error: " ++ error) ]
+                ]
+            }
 
 
-renderScene { lightPosition, cameraPosition, cameraAngle, width, height } =
+renderScene { material, ballFrame, lightPosition, cameraAngle, width, height } =
     Scene3d.custom
         (let
             lightPoint =
@@ -577,20 +674,18 @@ renderScene { lightPosition, cameraPosition, cameraAngle, width, height } =
                     , position = lightPoint
                     }
                 )
-                (Scene3d.Light.ambient
-                    { chromaticity = Scene3d.Light.incandescent
-                    , intensity = Illuminance.lux 30000
+                (Scene3d.Light.directional (Scene3d.Light.castsShadows True)
+                    { chromaticity = Scene3d.Light.sunlight
+                    , intensity = Illuminance.lux 200000
+                    , direction = Direction3d.negativeZ
                     }
                 )
          , camera =
             Camera3d.perspective
                 { viewpoint =
                     let
-                        ( x, y, z ) =
-                            cameraPosition
-
                         focalPoint =
-                            Point3d.inches x y z
+                            ballFrame |> Frame3d.originPoint
                     in
                     Viewpoint3d.lookAt
                         { eyePoint =
@@ -618,8 +713,9 @@ renderScene { lightPosition, cameraPosition, cameraAngle, width, height } =
                         |> Scene3d.translateBy (Vector3d.fromTuple Length.inches lightPosition)
                   ]
                 , staticEntities
-                , [ ballEntity
-                        |> Scene3d.translateBy (Vector3d.fromTuple Length.inches cameraPosition)
+                , [ Sphere3d.atOrigin (Length.inches 1)
+                        |> Scene3d.sphereWithShadow material
+                        |> Scene3d.placeIn ballFrame
                   ]
                 ]
          }
@@ -638,20 +734,6 @@ lightEntity =
                 (Luminance.nits
                     100000
                 )
-            )
-
-
-ballEntity =
-    Sphere3d.atPoint
-        (Point3d.inches 0 0 0)
-        (Length.inches
-            1
-        )
-        |> Scene3d.sphereWithShadow
-            (Scene3d.Material.metal
-                { baseColor = Color.rgb 1.0 0.766 0.336
-                , roughness = 0.4
-                }
             )
 
 

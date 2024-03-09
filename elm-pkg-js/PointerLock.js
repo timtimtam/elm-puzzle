@@ -2,7 +2,7 @@
 port supermario_copy_to_clipboard_to_js : String -> Cmd msg
 */
 
-exports.init = async function (app) {  
+exports.init = async function (app) {
   const targetDiv = document.getElementById("overlay-div")
 
   document.addEventListener("pointerlockchange", onLockChange, false);
