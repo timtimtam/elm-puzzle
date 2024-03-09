@@ -52,7 +52,7 @@ import SketchPlane3d
 import Speed
 import Sphere3d
 import Svg
-import Svg.Attributes
+import Svg.Attributes exposing (height)
 import Task
 import Types exposing (..)
 import Url
@@ -91,12 +91,14 @@ init _ _ =
     ( Loading
         { colorTexture = Nothing
         , roughnessTexture = Nothing
+        , width = 0
+        , height = 0
         }
     , Cmd.batch
         [ Task.attempt handleResult Browser.Dom.getViewport
-        , Scene3d.Material.load "https://ianmackenzie.github.io/elm-3d-scene/examples/leather/Leather11_col.jpg"
+        , Scene3d.Material.loadWith Scene3d.Material.nearestNeighborFiltering "/ball-color.png"
             |> Task.attempt GotColorTexture
-        , Scene3d.Material.load "https://ianmackenzie.github.io/elm-3d-scene/examples/leather/Leather11_rgh.jpg"
+        , Scene3d.Material.loadWith Scene3d.Material.nearestNeighborFiltering "/ball-roughness.png"
             |> Task.attempt GotRoughnessTexture
         ]
     )
@@ -140,13 +142,13 @@ cameraFrame3d position angle =
 update : FrontendMsg -> Model -> ( Model, Cmd msg )
 update msg loadingModel =
     case loadingModel of
-        Loading textures ->
+        Loading model ->
             ( case msg of
                 GotColorTexture (Ok colorTexture) ->
-                    checkIfLoaded { textures | colorTexture = Just colorTexture }
+                    checkIfLoaded { model | colorTexture = Just colorTexture }
 
                 GotRoughnessTexture (Ok roughnessTexture) ->
-                    checkIfLoaded { textures | roughnessTexture = Just roughnessTexture }
+                    checkIfLoaded { model | roughnessTexture = Just roughnessTexture }
 
                 GotColorTexture (Err _) ->
                     Errored "Error loading color texture"
@@ -154,8 +156,11 @@ update msg loadingModel =
                 GotRoughnessTexture (Err _) ->
                     Errored "Error loading roughness texture"
 
+                WindowResized w h ->
+                    Loading { model | width = w, height = h }
+
                 _ ->
-                    Loading textures
+                    Loading model
             , Cmd.none
             )
 
@@ -364,6 +369,8 @@ baseWorld =
 checkIfLoaded :
     { colorTexture : Maybe (Scene3d.Material.Texture Color.Color)
     , roughnessTexture : Maybe (Scene3d.Material.Texture Float)
+    , width : Float
+    , height : Float
     }
     -> Model
 checkIfLoaded textures =
@@ -372,8 +379,8 @@ checkIfLoaded textures =
             Loaded
                 { colorTexture = colorTexture
                 , roughnessTexture = roughnessTexture
-                , width = 0
-                , height = 0
+                , width = textures.width
+                , height = textures.height
                 , cameraAngle = Direction3dWire.fromDirection3d (Maybe.withDefault Direction3d.positiveX (Direction3d.from (Point3d.inches 0 0 0) (Point3d.inches 5 -4 2)))
                 , mouseButtonState = Up
                 , leftKey = Up
@@ -536,7 +543,7 @@ view model =
                             Scene3d.Material.texturedPbr
                                 { baseColor = colorTexture
                                 , roughness = roughnessTexture
-                                , metallic = Scene3d.Material.constant 0
+                                , metallic = roughnessTexture
                                 }
                         , lightPosition = lightPosition
                         , ballFrame =

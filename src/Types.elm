@@ -41,6 +41,8 @@ type FrontendModel
     = Loading
         { colorTexture : Maybe (Scene3d.Material.Texture Color.Color)
         , roughnessTexture : Maybe (Scene3d.Material.Texture Float)
+        , width : Float
+        , height : Float
         }
     | Loaded
         { colorTexture : Scene3d.Material.Texture Color.Color
