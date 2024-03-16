@@ -179,7 +179,7 @@ update msg model =
                         ( { model
                             | world = world
                             , viewAngleDelta = ( 0, 0 )
-                            , cameraAngle = newAngle |> Direction3dWire.fromDirection3d
+                            , cameraAngle = newAngle
                           }
                         , Cmd.none
                         )
@@ -665,7 +665,6 @@ renderScene { playerEntity, ballFrame, obstacleEntity, obstacleFrame, lightPosit
                             focalPoint
                                 |> Point3d.translateBy
                                     (cameraAngle
-                                        |> Direction3dWire.toDirection3d
                                         |> Vector3d.withLength (Length.inches 20)
                                     )
                         , focalPoint = focalPoint
