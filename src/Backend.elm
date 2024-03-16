@@ -1,6 +1,5 @@
 module Backend exposing (..)
 
-import Html
 import Lamdera
 import Types exposing (..)
 
