@@ -2,9 +2,15 @@ module Types exposing (..)
 
 import Color
 import Direction3d
+import Element
+import Length
 import Physics.Coordinates
 import Physics.World
+import Pixels
+import Point2d
+import Quantity
 import Scene3d.Material
+import Vector2d
 import WebGL.Texture
 
 
@@ -18,7 +24,7 @@ type ScreenCoordinates
 
 
 type TouchContact
-    = OneFinger { identifier : Int, screenPos : ( Float, Float ) }
+    = OneFinger { identifier : Int, screenPos : Point2d.Point2d Pixels.Pixels ScreenCoordinates }
     | NotOneFinger
 
 
@@ -38,8 +44,8 @@ type alias WorldData =
 
 
 type alias FrontendModel =
-    { width : Float
-    , height : Float
+    { width : Quantity.Quantity Int Pixels.Pixels
+    , height : Quantity.Quantity Int Pixels.Pixels
     , cameraAngle : Direction3d.Direction3d Physics.Coordinates.WorldCoordinates
     , leftKey : ButtonState
     , rightKey : ButtonState
@@ -48,8 +54,8 @@ type alias FrontendModel =
     , mouseButtonState : ButtonState
     , touches : TouchContact
     , world : Physics.World.World WorldData
-    , joystickPosition : { x : Float, y : Float }
-    , viewAngleDelta : ( Float, Float )
+    , joystickOffset : Vector2d.Vector2d Quantity.Unitless ScreenCoordinates
+    , viewPivotDelta : Vector2d.Vector2d Pixels.Pixels ScreenCoordinates
     , lightPosition : ( Float, Float, Float )
     , lastContact : ContactType
     , pointerCapture : PointerCapture
@@ -77,9 +83,9 @@ type ArrowKey
 
 
 type FrontendMsg
-    = WindowResized Float Float
+    = WindowResized (Quantity.Quantity Int Pixels.Pixels) (Quantity.Quantity Int Pixels.Pixels)
     | Tick Float
-    | MouseMoved Float Float
+    | MouseMoved (Vector2d.Vector2d Pixels.Pixels ScreenCoordinates)
     | MouseDown
     | MouseUp
     | ArrowKeyChanged ArrowKey ButtonState

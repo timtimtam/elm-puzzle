@@ -8,12 +8,14 @@ import Browser.Dom
 import Browser.Events
 import Browser.Navigation
 import Camera3d
+import Circle2d
 import Color
 import Direction2d
 import Direction3d
 import Duration
 import Force
 import Frame3d
+import Geometry.Svg
 import Html
 import Html.Attributes
 import Html.Events
@@ -77,21 +79,23 @@ handleResult v =
             NoOpFrontendMsg
 
         Ok vp ->
-            WindowResized vp.scene.width vp.scene.height
+            WindowResized
+                (vp.scene.width |> Basics.round |> Pixels.int)
+                (vp.scene.height |> Basics.round |> Pixels.int)
 
 
 init : Url.Url -> Browser.Navigation.Key -> ( Model, Cmd FrontendMsg )
 init _ _ =
-    ( { width = 0
-      , height = 0
+    ( { width = Quantity.zero
+      , height = Quantity.zero
       , cameraAngle = Maybe.withDefault Direction3d.positiveX (Direction3d.from (Point3d.inches 0 0 0) (Point3d.inches 5 -4 2))
       , mouseButtonState = Up
       , leftKey = Up
       , rightKey = Up
       , upKey = Up
       , downKey = Up
-      , joystickPosition = { x = 0, y = 0 }
-      , viewAngleDelta = ( 0, 0 )
+      , joystickOffset = Vector2d.zero
+      , viewPivotDelta = Vector2d.zero
       , lightPosition = ( 3, 3, 3 )
       , touches = NotOneFinger
       , lastContact = Mouse
@@ -115,7 +119,7 @@ type PlayerCoordinates
 
 
 radiansPerPixel =
-    -0.004
+    Angle.radians -0.004 |> Quantity.per (Pixels.float 1)
 
 
 cameraFrame3d :
@@ -153,12 +157,14 @@ update msg model =
 
         Tick tickMilliseconds ->
             let
-                ( rightPixels, upPixels ) =
-                    model.viewAngleDelta
+                angleDeltaVector =
+                    model.viewPivotDelta
+                        |> Vector2d.at radiansPerPixel
+                        |> Vector2d.mirrorAcross Axis2d.x
 
                 world =
                     simulate
-                        { joystick = Vector2d.unitless model.joystickPosition.x model.joystickPosition.y
+                        { joystick = model.joystickOffset
                         , facingAngle =
                             model.cameraAngle
                                 |> Direction3d.azimuthIn SketchPlane3d.xy
@@ -172,13 +178,13 @@ update msg model =
                         let
                             newAngle =
                                 frame
-                                    |> Frame3d.rotateAroundOwn Frame3d.zAxis (Angle.radians (rightPixels * radiansPerPixel))
-                                    |> Frame3d.rotateAroundOwn Frame3d.xAxis (Angle.radians (-upPixels * radiansPerPixel))
+                                    |> Frame3d.rotateAroundOwn Frame3d.zAxis (angleDeltaVector |> Vector2d.xComponent)
+                                    |> Frame3d.rotateAroundOwn Frame3d.xAxis (angleDeltaVector |> Vector2d.yComponent)
                                     |> Frame3d.yDirection
                         in
                         ( { model
                             | world = world
-                            , viewAngleDelta = ( 0, 0 )
+                            , viewPivotDelta = Vector2d.zero
                             , cameraAngle = newAngle
                           }
                         , Cmd.none
@@ -186,19 +192,15 @@ update msg model =
                     )
                 |> Maybe.withDefault ( model, Cmd.none )
 
-        MouseMoved x y ->
+        MouseMoved offset ->
             ( { model
-                | viewAngleDelta =
+                | viewPivotDelta =
                     case model.pointerCapture of
                         PointerLocked ->
-                            let
-                                ( a, b ) =
-                                    model.viewAngleDelta
-                            in
-                            ( a + x, b + y )
+                            model.viewPivotDelta |> Vector2d.plus offset
 
                         PointerNotLocked ->
-                            model.viewAngleDelta
+                            model.viewPivotDelta
                 , lastContact = Mouse
               }
             , Cmd.none
@@ -249,50 +251,41 @@ update msg model =
                             0
 
                 newXY =
-                    case Direction2d.from Point2d.origin (Point2d.fromUnitless { x = newJoystickX, y = newJoystickY }) of
-                        Just direction ->
-                            direction |> Direction2d.toVector |> Vector2d.toRecord Quantity.toFloat
-
-                        Nothing ->
-                            { x = 0, y = 0 }
+                    Vector2d.fromUnitless { x = newJoystickX, y = newJoystickY } |> capVector2d
             in
-            ( { newModel | joystickPosition = newXY }, Cmd.none )
+            ( { newModel | joystickOffset = newXY }, Cmd.none )
 
         TouchesChanged contact ->
             let
-                zeroDelta =
-                    ( 0, 0 )
-
                 delta =
                     case ( model.touches, contact ) of
                         ( OneFinger old, OneFinger new ) ->
                             if old.identifier == new.identifier then
-                                tupleSubtract new.screenPos old.screenPos
+                                Vector2d.from old.screenPos new.screenPos
 
                             else
-                                zeroDelta
+                                Vector2d.zero
 
                         _ ->
-                            zeroDelta
+                            Vector2d.zero
 
                 totalDelta =
-                    tupleAdd delta model.viewAngleDelta
+                    model.viewPivotDelta |> Vector2d.plus delta
             in
-            ( { model | touches = contact, viewAngleDelta = totalDelta, lastContact = Touch }, Cmd.none )
+            ( { model | touches = contact, viewPivotDelta = totalDelta, lastContact = Touch }, Cmd.none )
 
         JoystickTouchChanged contact ->
             let
                 newJoystickPosition =
                     case contact of
                         OneFinger { screenPos } ->
-                            case ( joystickOrigin model.height, screenPos ) of
-                                ( ( jx, jy ), ( sx, sy ) ) ->
-                                    { x = (sx - jx) / joystickFreedom, y = (sy - jy) / joystickFreedom }
+                            Vector2d.from (getJoystickOrigin model.height) screenPos
+                                |> Vector2d.at_ pixelsPerJoystickWidth
 
                         NotOneFinger ->
-                            { x = 0, y = 0 }
+                            Vector2d.zero
             in
-            ( { model | lastContact = Touch, joystickPosition = newJoystickPosition }, Cmd.none )
+            ( { model | lastContact = Touch, joystickOffset = newJoystickPosition }, Cmd.none )
 
         ShootClicked ->
             ( model, Cmd.none )
@@ -429,45 +422,61 @@ toTouchMsg e =
         [ touch ] ->
             OneFinger
                 { identifier = touch.identifier
-                , screenPos = touch.clientPos
+                , screenPos = touch.clientPos |> Point2d.fromTuple Pixels.float
                 }
 
         _ ->
             NotOneFinger
 
 
-joystickOrigin height =
-    ( 130, height - 70 )
+getJoystickOrigin : Quantity.Quantity Int Pixels.Pixels -> Point2d.Point2d Pixels.Pixels ScreenCoordinates
+getJoystickOrigin height =
+    Point2d.xy
+        (Pixels.float 130)
+        (height |> Quantity.toFloatQuantity |> Quantity.minus (Pixels.float 70))
 
 
 joystickSize =
-    20
+    Pixels.float 20
 
 
-joystickFreedom =
-    40
+pixelsPerJoystickWidth =
+    Pixels.float 40 |> Quantity.per (Quantity.float 1)
 
 
-shootButtonLocation width height =
-    ( width - 100, height - 200 )
+getShootButtonLocation width height =
+    Point2d.xy
+        (width |> Quantity.toFloatQuantity |> Quantity.minus (Pixels.float 100))
+        (height |> Quantity.toFloatQuantity |> Quantity.minus (Pixels.float 100))
+
+
+getCrossHairLocation width height =
+    Point2d.xy
+        (width |> Quantity.toFloatQuantity |> Quantity.half)
+        (height |> Quantity.toFloatQuantity |> Quantity.half)
 
 
 crossHair width height =
-    Svg.circle
-        [ Svg.Attributes.cx (String.fromFloat (width / 2))
-        , Svg.Attributes.cy (String.fromFloat (height / 2))
-        , Svg.Attributes.r (String.fromFloat (joystickSize / 3))
-        , Svg.Attributes.fill (Color.toCssString (Color.fromRgba { red = 0, blue = 0, green = 0, alpha = 0 }))
-        , Svg.Attributes.strokeWidth (String.fromFloat (joystickSize / 8))
+    Geometry.Svg.circle2d
+        [ Svg.Attributes.fill (Color.toCssString (Color.fromRgba { red = 0, blue = 0, green = 0, alpha = 0 }))
+        , Svg.Attributes.strokeWidth (joystickSize |> Quantity.divideBy 8 |> Pixels.inPixels |> String.fromFloat)
         , Svg.Attributes.stroke "white"
         , Svg.Attributes.strokeOpacity "0.5"
         , Html.Events.onClick ShootClicked
         ]
-        []
+        (getCrossHairLocation width height |> Circle2d.withRadius (joystickSize |> Quantity.divideBy 3))
+
+
+capVector2d vector =
+    if vector |> Vector2d.length |> Quantity.greaterThan (Quantity.float 1) then
+        Vector2d.normalize vector
+
+    else
+        vector
 
 
 view : Model -> Browser.Document FrontendMsg
-view { playerColorTexture, width, height, cameraAngle, lightPosition, lastContact, joystickPosition, pointerCapture, world } =
+view { playerColorTexture, width, height, cameraAngle, lightPosition, lastContact, joystickOffset, pointerCapture, world } =
     let
         playerBody =
             List.Extra.find
@@ -479,17 +488,8 @@ view { playerColorTexture, width, height, cameraAngle, lightPosition, lastContac
                 (\body -> Physics.Body.data body == Dynamic)
                 (world |> Physics.World.bodies)
 
-        joystickVector =
-            joystickPosition |> Vector2d.fromRecord Quantity.float
-
         joystickCapped =
-            (if joystickVector |> Vector2d.length |> Quantity.greaterThan (Quantity.float 1) then
-                Vector2d.normalize joystickVector
-
-             else
-                joystickVector
-            )
-                |> Vector2d.toRecord Quantity.toFloat
+            capVector2d joystickOffset
     in
     { title = "elm-ball"
     , body =
@@ -555,7 +555,7 @@ view { playerColorTexture, width, height, cameraAngle, lightPosition, lastContac
 
                     PointerLocked ->
                         Json.Decode.map2
-                            (\a b -> { message = MouseMoved a b, preventDefault = True, stopPropagation = False })
+                            (\a b -> { message = MouseMoved (( a, b ) |> Vector2d.fromTuple Pixels.float), preventDefault = True, stopPropagation = False })
                             (Json.Decode.field "movementX" Json.Decode.float)
                             (Json.Decode.field "movementY" Json.Decode.float)
                 )
@@ -571,50 +571,50 @@ view { playerColorTexture, width, height, cameraAngle, lightPosition, lastContac
                 { preventDefault = True, stopPropagation = True }
                 (\event -> TouchesChanged (toTouchMsg event))
             ]
-            [ Svg.svg
-                [ Svg.Attributes.width (String.fromFloat width)
-                , Svg.Attributes.height (String.fromFloat height)
-                , Svg.Attributes.viewBox ("0 0 " ++ String.fromFloat width ++ " " ++ String.fromFloat height)
+            [ let
+                widthText =
+                    width |> Pixels.inPixels |> String.fromInt
+
+                heightText =
+                    height |> Pixels.inPixels |> String.fromInt
+              in
+              Svg.svg
+                [ Svg.Attributes.width widthText
+                , Svg.Attributes.height heightText
+                , Svg.Attributes.viewBox ("0 0 " ++ widthText ++ " " ++ heightText)
                 ]
                 (case lastContact of
                     Touch ->
-                        case joystickOrigin height of
-                            ( cx, cy ) ->
-                                [ Svg.circle
-                                    [ Svg.Attributes.cx (String.fromFloat (cx + joystickCapped.x * joystickFreedom))
-                                    , Svg.Attributes.cy (String.fromFloat (cy + joystickCapped.y * joystickFreedom))
-                                    , Svg.Attributes.r (String.fromFloat joystickSize)
-                                    , Svg.Attributes.fill (Color.toCssString (Color.fromRgba { red = 0, blue = 0, green = 0, alpha = 0.2 }))
-                                    ]
-                                    []
-                                , Svg.circle
-                                    [ Svg.Attributes.cx (String.fromFloat cx)
-                                    , Svg.Attributes.cy (String.fromFloat cy)
-                                    , Svg.Attributes.r (String.fromFloat (joystickFreedom + joystickSize / 2))
-                                    , Svg.Attributes.fill (Color.toCssString (Color.fromRgba { red = 0, blue = 0, green = 0, alpha = 0.2 }))
-                                    , Html.Events.Extra.Touch.onWithOptions "touchstart"
-                                        { preventDefault = True, stopPropagation = True }
-                                        (\event -> JoystickTouchChanged (toTouchMsg event))
-                                    , Html.Events.Extra.Touch.onWithOptions "touchmove"
-                                        { preventDefault = True, stopPropagation = True }
-                                        (\event -> JoystickTouchChanged (toTouchMsg event))
-                                    , Html.Events.Extra.Touch.onWithOptions "touchend"
-                                        { preventDefault = True, stopPropagation = True }
-                                        (\event -> JoystickTouchChanged (toTouchMsg event))
-                                    ]
-                                    []
-                                , case shootButtonLocation width height of
-                                    ( bx, by ) ->
-                                        Svg.circle
-                                            [ Svg.Attributes.cx (String.fromFloat bx)
-                                            , Svg.Attributes.cy (String.fromFloat by)
-                                            , Svg.Attributes.r (String.fromFloat joystickSize)
-                                            , Svg.Attributes.fill (Color.toCssString (Color.fromRgba { red = 0, blue = 0, green = 0, alpha = 0.2 }))
-                                            , Html.Events.onClick ShootClicked
-                                            ]
-                                            []
-                                , crossHair width height
-                                ]
+                        let
+                            joystickOrigin =
+                                getJoystickOrigin height
+                        in
+                        [ Geometry.Svg.circle2d
+                            [ Svg.Attributes.fill (Color.toCssString (Color.fromRgba { red = 0, blue = 0, green = 0, alpha = 0.2 }))
+                            ]
+                            (Circle2d.withRadius joystickSize
+                                (joystickOrigin |> Point2d.translateBy (joystickCapped |> Vector2d.at pixelsPerJoystickWidth))
+                            )
+                        , Geometry.Svg.circle2d
+                            [ Svg.Attributes.fill (Color.toCssString (Color.fromRgba { red = 0, blue = 0, green = 0, alpha = 0.2 }))
+                            , Html.Events.Extra.Touch.onWithOptions "touchstart"
+                                { preventDefault = True, stopPropagation = True }
+                                (\event -> JoystickTouchChanged (toTouchMsg event))
+                            , Html.Events.Extra.Touch.onWithOptions "touchmove"
+                                { preventDefault = True, stopPropagation = True }
+                                (\event -> JoystickTouchChanged (toTouchMsg event))
+                            , Html.Events.Extra.Touch.onWithOptions "touchend"
+                                { preventDefault = True, stopPropagation = True }
+                                (\event -> JoystickTouchChanged (toTouchMsg event))
+                            ]
+                            (Circle2d.withRadius (Quantity.float 1 |> Quantity.at pixelsPerJoystickWidth) joystickOrigin)
+                        , Geometry.Svg.circle2d
+                            [ Svg.Attributes.fill (Color.toCssString (Color.fromRgba { red = 0, blue = 0, green = 0, alpha = 0.2 }))
+                            , Html.Events.onClick ShootClicked
+                            ]
+                            (Circle2d.withRadius joystickSize (getShootButtonLocation width height))
+                        , crossHair width height
+                        ]
 
                     Mouse ->
                         [ crossHair width height ]
@@ -677,7 +677,7 @@ renderScene { playerEntity, ballFrame, obstacleEntity, obstacleFrame, lightPosit
          , toneMapping = Scene3d.hableFilmicToneMapping
          , whiteBalance = Scene3d.Light.incandescent
          , antialiasing = Scene3d.multisampling
-         , dimensions = ( Pixels.int (round width), Pixels.int (round height) )
+         , dimensions = ( width, height )
          , background = Scene3d.backgroundColor (Color.fromRgba { red = 0.17, green = 0.17, blue = 0.19, alpha = 1 })
          , entities =
             List.concat
@@ -761,7 +761,7 @@ handleArrowKey { altKey, ctrlKey, keyCode, metaKey, repeat, shiftKey } =
 subscriptions : Model -> Sub FrontendMsg
 subscriptions _ =
     Sub.batch
-        [ Browser.Events.onResize (\x y -> WindowResized (toFloat x) (toFloat y))
+        [ Browser.Events.onResize (\x y -> WindowResized (Pixels.int x) (Pixels.int y))
         , Browser.Events.onKeyDown
             (Keyboard.Event.considerKeyboardEvent
                 (\event -> Maybe.map (\key -> ArrowKeyChanged key Down) (handleArrowKey event))
