@@ -96,7 +96,7 @@ init _ _ =
       , downKey = Up
       , joystickOffset = Vector2d.zero
       , viewPivotDelta = Vector2d.zero
-      , lightPosition = ( 3, 3, 3 )
+      , lightPosition = ( 3, 3, 3 ) |> Point3d.fromTuple Length.inches
       , touches = NotOneFinger
       , lastContact = Mouse
       , pointerCapture = PointerNotLocked
@@ -626,18 +626,12 @@ view { playerColorTexture, width, height, cameraAngle, lightPosition, lastContac
 
 renderScene { playerEntity, ballFrame, obstacleEntity, obstacleFrame, lightPosition, cameraAngle, width, height } =
     Scene3d.custom
-        (let
-            lightPoint =
-                case lightPosition of
-                    ( x, y, z ) ->
-                        Point3d.inches x y z
-         in
-         { lights =
+        { lights =
             Scene3d.threeLights
                 (Scene3d.Light.point (Scene3d.Light.castsShadows True)
                     { chromaticity = Scene3d.Light.fluorescent
                     , intensity = LuminousFlux.lumens 10000
-                    , position = lightPoint
+                    , position = lightPosition
                     }
                 )
                 (Scene3d.Light.directional (Scene3d.Light.castsShadows True)
@@ -653,7 +647,7 @@ renderScene { playerEntity, ballFrame, obstacleEntity, obstacleFrame, lightPosit
                     , intensityBelow = Illuminance.lux 2000
                     }
                 )
-         , camera =
+        , camera =
             Camera3d.perspective
                 { viewpoint =
                     let
@@ -672,17 +666,17 @@ renderScene { playerEntity, ballFrame, obstacleEntity, obstacleFrame, lightPosit
                         }
                 , verticalFieldOfView = Angle.degrees 45
                 }
-         , clipDepth = Length.centimeters 0.5
-         , exposure = Scene3d.exposureValue 15
-         , toneMapping = Scene3d.hableFilmicToneMapping
-         , whiteBalance = Scene3d.Light.incandescent
-         , antialiasing = Scene3d.multisampling
-         , dimensions = ( width, height )
-         , background = Scene3d.backgroundColor (Color.fromRgba { red = 0.17, green = 0.17, blue = 0.19, alpha = 1 })
-         , entities =
+        , clipDepth = Length.centimeters 0.5
+        , exposure = Scene3d.exposureValue 15
+        , toneMapping = Scene3d.hableFilmicToneMapping
+        , whiteBalance = Scene3d.Light.incandescent
+        , antialiasing = Scene3d.multisampling
+        , dimensions = ( width, height )
+        , background = Scene3d.backgroundColor (Color.fromRgba { red = 0.17, green = 0.17, blue = 0.19, alpha = 1 })
+        , entities =
             List.concat
                 [ [ lightEntity
-                        |> Scene3d.translateBy (Vector3d.fromTuple Length.inches lightPosition)
+                        |> Scene3d.translateBy (Vector3d.from Point3d.origin lightPosition)
                   ]
                 , staticEntities
                 , [ playerEntity
@@ -691,8 +685,7 @@ renderScene { playerEntity, ballFrame, obstacleEntity, obstacleFrame, lightPosit
                         |> Scene3d.placeIn obstacleFrame
                   ]
                 ]
-         }
-        )
+        }
 
 
 lightEntity =

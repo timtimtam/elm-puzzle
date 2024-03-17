@@ -8,6 +8,7 @@ import Physics.Coordinates
 import Physics.World
 import Pixels
 import Point2d
+import Point3d
 import Quantity
 import Scene3d.Material
 import Vector2d
@@ -56,7 +57,7 @@ type alias FrontendModel =
     , world : Physics.World.World WorldData
     , joystickOffset : Vector2d.Vector2d Quantity.Unitless ScreenCoordinates
     , viewPivotDelta : Vector2d.Vector2d Pixels.Pixels ScreenCoordinates
-    , lightPosition : ( Float, Float, Float )
+    , lightPosition : Point3d.Point3d Length.Meters Physics.Coordinates.WorldCoordinates
     , lastContact : ContactType
     , pointerCapture : PointerCapture
     , playerColorTexture : Maybe (Scene3d.Material.Texture Color.Color)
