@@ -19,8 +19,11 @@ See <https://dashboard.lamdera.app/docs/evergreen> for more info.
 
 -}
 
+import Array
 import Direction3d
 import Evergreen.V27.Types
+import Evergreen.V28.Geometry.Types
+import Evergreen.V28.Internal.World
 import Evergreen.V28.Types
 import Lamdera.Migrations exposing (..)
 import Physics.World
@@ -32,7 +35,7 @@ frontendModel old =
     ModelMigrated
         ( { width = 0
           , height = 0
-          , cameraAngle = Maybe.withDefault Direction3d.positiveX (Direction3d.from (Point3d.inches 0 0 0) (Point3d.inches 5 -4 2))
+          , cameraAngle = Evergreen.V28.Geometry.Types.Direction3d { x = 1, y = 0, z = 0 }
           , mouseButtonState = Evergreen.V28.Types.Up
           , leftKey = Evergreen.V28.Types.Up
           , rightKey = Evergreen.V28.Types.Up
@@ -44,7 +47,16 @@ frontendModel old =
           , touches = Evergreen.V28.Types.NotOneFinger
           , lastContact = Evergreen.V28.Types.Mouse
           , pointerCapture = Evergreen.V28.Types.PointerNotLocked
-          , world = Physics.World.empty
+          , world =
+                Evergreen.V28.Internal.World.Protected
+                    { bodies = []
+                    , constraints = []
+                    , freeIds = []
+                    , nextBodyId = 0
+                    , gravity = { x = 0, y = 0, z = -9.8 }
+                    , contactGroups = []
+                    , simulatedBodies = Array.empty
+                    }
           , playerColorTexture = Nothing
           , playerRoughnessTexture = Nothing
           }
