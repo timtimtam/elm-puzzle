@@ -48,8 +48,9 @@ import Scene3d.Material
 import SketchPlane3d
 import Sphere3d
 import Svg
-import Svg.Attributes exposing (height)
+import Svg.Attributes
 import Task
+import Torque
 import Types exposing (..)
 import Url
 import Vector2d
@@ -316,6 +317,26 @@ update msg model =
             ( model, Cmd.none )
 
 
+friction =
+    0.002
+
+
+bounciness =
+    0.5
+
+
+dampingLinear =
+    0.3
+
+
+dampingAngular =
+    0.2
+
+
+maxTorque =
+    Torque.newtonMeters 0.05
+
+
 baseWorld =
     Physics.World.empty
         |> Physics.World.withGravity
@@ -325,23 +346,24 @@ baseWorld =
             (Physics.Body.sphere
                 (Sphere3d.atOrigin (Length.inches 1))
                 Player
-                |> Physics.Body.moveTo (Point3d.inches 0 0 5)
+                |> Physics.Body.moveTo (Point3d.inches 0 0 0.5)
                 |> Physics.Body.withBehavior (Physics.Body.dynamic (Mass.kilograms 1))
-                |> Physics.Body.withMaterial (Physics.Material.custom { friction = 0, bounciness = 0.9 })
-                |> Physics.Body.withDamping { linear = 0.8, angular = 0.8 }
+                |> Physics.Body.withMaterial (Physics.Material.custom { friction = friction, bounciness = bounciness })
+                |> Physics.Body.withDamping { linear = dampingLinear, angular = dampingAngular }
             )
         |> Physics.World.add
             (Physics.Body.sphere
-                (Sphere3d.atOrigin (Length.inches 2))
+                (Sphere3d.atOrigin (Length.inches 1))
                 Dynamic
-                |> Physics.Body.moveTo (Point3d.inches 10 0 5)
-                |> Physics.Body.withBehavior (Physics.Body.dynamic (Mass.kilograms 5))
-                |> Physics.Body.withMaterial (Physics.Material.custom { friction = 0, bounciness = 0 })
-                |> Physics.Body.withDamping { linear = 0.2, angular = 0.2 }
+                |> Physics.Body.moveTo (Point3d.inches 10 0 0.5)
+                |> Physics.Body.withBehavior (Physics.Body.dynamic (Mass.kilograms 1))
+                |> Physics.Body.withMaterial (Physics.Material.custom { friction = friction, bounciness = bounciness })
+                |> Physics.Body.withDamping { linear = dampingLinear, angular = dampingAngular }
             )
         |> Physics.World.add
             (Physics.Body.plane Static
                 |> Physics.Body.moveTo (Point3d.meters 0 0 0)
+                |> Physics.Body.withMaterial (Physics.Material.custom { friction = friction, bounciness = bounciness })
             )
 
 
@@ -352,6 +374,42 @@ updateFromBackend msg model =
 
         NoOpToFrontend ->
             ( model, Cmd.none )
+
+
+applyTorque : Vector3d.Vector3d Torque.NewtonMeters Physics.Coordinates.WorldCoordinates -> Physics.Body.Body data -> Physics.Body.Body data
+applyTorque torque body =
+    case Vector3d.direction torque of
+        Just torqueDirection ->
+            let
+                centerOfMass =
+                    Physics.Body.centerOfMass body |> Point3d.placeIn (Physics.Body.frame body)
+
+                offsetLength =
+                    Length.inches 0.1
+
+                frame =
+                    Frame3d.withZDirection torqueDirection centerOfMass
+
+                offsetVector =
+                    Frame3d.yDirection frame |> Vector3d.withLength offsetLength
+
+                newtons =
+                    Vector3d.length torque
+                        |> Quantity.over_ offsetLength
+                        |> Quantity.half
+            in
+            body
+                |> Physics.Body.applyForce
+                    newtons
+                    (Frame3d.xDirection frame)
+                    (centerOfMass |> Point3d.translateBy offsetVector)
+                |> Physics.Body.applyForce
+                    newtons
+                    (Frame3d.xDirection frame |> Direction3d.reverse)
+                    (centerOfMass |> Point3d.translateBy (Vector3d.reverse offsetVector))
+
+        Nothing ->
+            body
 
 
 simulate :
@@ -374,8 +432,8 @@ simulate { joystick, facingAngle } duration world =
                 |> Vector2d.rotateBy facingAngle
                 |> Vector2d.rotateBy (Angle.turns 0.25)
 
-        newtons =
-            joystickCapped |> Vector2d.length |> Quantity.toFloat |> Force.newtons
+        torque =
+            maxTorque |> Quantity.timesUnitless (Vector2d.length joystickCapped)
     in
     world
         |> Physics.World.update
@@ -387,16 +445,13 @@ simulate { joystick, facingAngle } duration world =
                                 case Vector2d.direction joystickCapped of
                                     Just direction2d ->
                                         Direction3d.on SketchPlane3d.xy
-                                            direction2d
+                                            (direction2d |> Direction2d.rotateBy (Angle.turns -0.25))
 
                                     Nothing ->
                                         Direction3d.z
                         in
                         body
-                            |> Physics.Body.applyForce
-                                newtons
-                                direction
-                                (Physics.Body.originPoint body)
+                            |> applyTorque (direction |> Vector3d.withLength torque)
 
                     _ ->
                         body
@@ -520,7 +575,7 @@ view { playerColorTexture, width, height, cameraAngle, lightPosition, lastContac
                         Nothing ->
                             Frame3d.atOrigin
                 , obstacleEntity =
-                    Sphere3d.atOrigin (Length.inches 2)
+                    Sphere3d.atOrigin (Length.inches 1)
                         |> Scene3d.sphereWithShadow
                             (case playerColorTexture of
                                 Just texture ->
