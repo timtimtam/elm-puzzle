@@ -102,20 +102,20 @@ simulate duration world =
             (\body ->
                 case Physics.Body.data body of
                     BackendPlayer _ ->
+                        let
+                            { x, y } =
+                                Physics.Body.frame body
+                                    |> Frame3d.originPoint
+                                    |> Point3d.toRecord Length.inInches
+                        in
                         if
                             Physics.Body.frame body
                                 |> Frame3d.originPoint
                                 |> Point3d.signedDistanceFrom Plane3d.xy
                                 |> Quantity.lessThan (Length.inches 0.49)
                         then
-                            let
-                                { x, y } =
-                                    Physics.Body.frame body
-                                        |> Frame3d.originPoint
-                                        |> Point3d.toMeters
-                            in
                             body
-                                |> Physics.Body.withFrame (Physics.Body.frame body |> Frame3d.moveTo (Point3d.meters x y 0.5))
+                                |> Physics.Body.withFrame (Physics.Body.frame body |> Frame3d.moveTo (Point3d.inches x y 0.5))
                                 |> Physics.Body.withBehavior
                                     (Physics.Body.dynamic (Mass.kilograms 1)
                                         (body |> Physics.Body.velocity |> Vector3d.projectOnto Plane3d.xy)
@@ -124,6 +124,11 @@ simulate duration world =
 
                         else
                             body
+                                |> Physics.Body.withBehavior
+                                    (Physics.Body.dynamic (Mass.kilograms 1)
+                                        (body |> Physics.Body.velocity |> Vector3d.projectOnto Plane3d.xy)
+                                        (body |> Physics.Body.angularVelocity)
+                                    )
 
                     _ ->
                         body
@@ -284,7 +289,7 @@ updateFromFrontend sessionId clientId msg model =
                                         , time = Time.millisToPosix 0
                                         }
                                     )
-                                    |> Physics.Body.withFrame (Frame3d.atPoint (Point3d.inches 0 (model.nextId * 3 |> toFloat) 100))
+                                    |> Physics.Body.withFrame (Frame3d.atPoint (Point3d.inches 0 (model.nextId * 3 |> toFloat) 0.5))
                                     |> Physics.Body.withBehavior
                                         (Physics.Body.dynamic (Mass.kilograms 1)
                                             (Vector3d.fromTuple Speed.feetPerSecond ( 0.1, 0.1, 2 ))
