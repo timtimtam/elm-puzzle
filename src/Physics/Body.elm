@@ -6,6 +6,7 @@ module Physics.Body exposing
     , data, withData
     , applyForce, applyImpulse
     , withMaterial, compound, withDamping, transformWithInverseInertia
+    , withFrame
     )
 
 {-|
@@ -185,15 +186,15 @@ particle =
 {-| Bodies may have static or dynamic behavior.
 -}
 type Behavior
-    = Dynamic Float
+    = Dynamic Float (Vector3d MetersPerSecond WorldCoordinates) (Vector3d RadiansPerSecond WorldCoordinates)
     | Static
 
 
 {-| Dynamic bodies move and react to forces and collide with
 other dynamic and static bodies.
 -}
-dynamic : Mass -> Behavior
-dynamic kilos =
+dynamic : Mass -> Vector3d MetersPerSecond WorldCoordinates -> Vector3d RadiansPerSecond WorldCoordinates -> Behavior
+dynamic kilos velocity_ angularVelocity_ =
     let
         mass_ =
             Mass.inKilograms kilos
@@ -202,7 +203,7 @@ dynamic kilos =
         Static
 
     else
-        Dynamic mass_
+        Dynamic mass_ velocity_ angularVelocity_
 
 
 {-| Static bodies don’t move and only collide with dynamic bodies.
@@ -222,7 +223,7 @@ static =
 withBehavior : Behavior -> Body data -> Body data
 withBehavior behavior (Protected body) =
     case behavior of
-        Dynamic mass_ ->
+        Dynamic mass_ velocity_ angularVelocity_ ->
             case body.shapes of
                 [] ->
                     Protected body
@@ -233,10 +234,24 @@ withBehavior behavior (Protected body) =
                             Protected body
 
                         _ ->
-                            Protected (Internal.updateMassProperties { body | mass = mass_ })
+                            Protected
+                                (Internal.updateMassProperties
+                                    { body
+                                        | mass = mass_
+                                        , velocity = velocity_ |> Vector3d.unwrap
+                                        , angularVelocity = angularVelocity_ |> Vector3d.unwrap
+                                    }
+                                )
 
                 _ ->
-                    Protected (Internal.updateMassProperties { body | mass = mass_ })
+                    Protected
+                        (Internal.updateMassProperties
+                            { body
+                                | mass = mass_
+                                , velocity = velocity_ |> Vector3d.unwrap
+                                , angularVelocity = angularVelocity_ |> Vector3d.unwrap
+                            }
+                        )
 
         Static ->
             Protected (Internal.updateMassProperties { body | mass = 0 })
@@ -357,6 +372,43 @@ moveTo point3d (Protected body) =
         newTransform3d =
             Transform3d.placeIn
                 (Transform3d.moveTo (Point3d.toMeters point3d) bodyCoordinatesTransform3d)
+                body.centerOfMassTransform3d
+    in
+    Protected
+        { body
+            | transform3d = newTransform3d
+            , worldShapes = InternalShape.shapesPlaceIn newTransform3d body.shapes
+        }
+
+
+withFrame : Frame3d Meters WorldCoordinates { defines : BodyCoordinates } -> Body data -> Body data
+withFrame frame3d (Protected body) =
+    let
+        rightHandedFrame3d =
+            if Frame3d.isRightHanded frame3d then
+                frame3d
+
+            else
+                Frame3d.reverseZ frame3d
+
+        origin =
+            Point3d.unwrap (Frame3d.originPoint rightHandedFrame3d)
+
+        x =
+            Direction3d.unwrap (Frame3d.xDirection rightHandedFrame3d)
+
+        y =
+            Direction3d.unwrap (Frame3d.yDirection rightHandedFrame3d)
+
+        z =
+            Direction3d.unwrap (Frame3d.zDirection rightHandedFrame3d)
+
+        tranform3d =
+            Transform3d.fromOriginAndBasis origin x y z
+
+        newTransform3d =
+            Transform3d.placeIn
+                tranform3d
                 body.centerOfMassTransform3d
     in
     Protected

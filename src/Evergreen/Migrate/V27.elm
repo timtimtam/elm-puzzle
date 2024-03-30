@@ -58,7 +58,7 @@ import Evergreen.V27.Shapes.Sphere
 import Evergreen.V27.Types
 import Lamdera.Migrations exposing (..)
 import List
-import Types exposing (BodyType(..))
+import Types exposing (WorldData(..))
 
 
 frontendModel : Evergreen.V26.Types.FrontendModel -> ModelMigration Evergreen.V27.Types.FrontendModel Evergreen.V27.Types.FrontendMsg
