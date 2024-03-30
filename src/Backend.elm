@@ -114,7 +114,13 @@ simulate duration world =
                                         |> Frame3d.originPoint
                                         |> Point3d.toMeters
                             in
-                            body |> Physics.Body.withFrame (Physics.Body.frame body |> Frame3d.moveTo (Point3d.meters x y 0.5))
+                            body
+                                |> Physics.Body.withFrame (Physics.Body.frame body |> Frame3d.moveTo (Point3d.meters x y 0.5))
+                                |> Physics.Body.withBehavior
+                                    (Physics.Body.dynamic (Mass.kilograms 1)
+                                        (body |> Physics.Body.velocity |> Vector3d.projectOnto Plane3d.xy)
+                                        (body |> Physics.Body.angularVelocity)
+                                    )
 
                         else
                             body
