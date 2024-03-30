@@ -12,8 +12,10 @@ import Mass
 import Physics.Body
 import Physics.Material
 import Physics.World
+import Plane3d
 import Platform.Sub as Sub
 import Point3d
+import Quantity
 import Set
 import SharedLogic
 import Speed
@@ -96,6 +98,30 @@ simulate duration world =
                         body
             )
         |> Physics.World.simulate duration
+        |> Physics.World.update
+            (\body ->
+                case Physics.Body.data body of
+                    BackendPlayer _ ->
+                        if
+                            Physics.Body.frame body
+                                |> Frame3d.originPoint
+                                |> Point3d.signedDistanceFrom Plane3d.xy
+                                |> Quantity.lessThan (Length.inches 0.49)
+                        then
+                            let
+                                { x, y } =
+                                    Physics.Body.frame body
+                                        |> Frame3d.originPoint
+                                        |> Point3d.toMeters
+                            in
+                            body |> Physics.Body.withFrame (Physics.Body.frame body |> Frame3d.moveTo (Point3d.meters x y 0.5))
+
+                        else
+                            body
+
+                    _ ->
+                        body
+            )
 
 
 update : BackendMsg -> BackendModel -> ( BackendModel, Cmd BackendMsg )
@@ -252,7 +278,7 @@ updateFromFrontend sessionId clientId msg model =
                                         , time = Time.millisToPosix 0
                                         }
                                     )
-                                    |> Physics.Body.withFrame (Frame3d.atPoint (Point3d.inches 0 (model.nextId * 3 |> toFloat) 1000))
+                                    |> Physics.Body.withFrame (Frame3d.atPoint (Point3d.inches 0 (model.nextId * 3 |> toFloat) 100))
                                     |> Physics.Body.withBehavior
                                         (Physics.Body.dynamic (Mass.kilograms 1)
                                             (Vector3d.fromTuple Speed.feetPerSecond ( 0.1, 0.1, 2 ))
