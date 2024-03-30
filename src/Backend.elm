@@ -4,8 +4,10 @@ import Constants
 import Direction3d
 import Duration
 import Frame3d
+import Iso8601
 import Lamdera
 import Length
+import List.Extra
 import Mass
 import Physics.Body
 import Physics.Material
@@ -84,8 +86,10 @@ simulate duration world =
         |> Physics.World.update
             (\body ->
                 case Physics.Body.data body of
-                    BackendPlayer { movement } ->
-                        body |> SharedLogic.applyMovementForce movement
+                    BackendPlayer player ->
+                        body
+                            |> SharedLogic.applyMovementForce player.movement
+                            |> Physics.Body.withData (BackendPlayer { player | time = duration |> Duration.addTo player.time })
 
                     _ ->
                         body
@@ -164,7 +168,7 @@ update msg model =
                             model.world |> simulate tickDuration
 
                         willUpdate =
-                            (Duration.from previousUpdateTime time |> Duration.inMilliseconds) > 100
+                            (Duration.from previousUpdateTime time |> Duration.inMilliseconds) > 30
                     in
                     ( { model
                         | world = newWorld
@@ -205,6 +209,7 @@ getWirableWorldState world =
                             , velocity = Physics.Body.velocity body
                             , angularVelocity = Physics.Body.angularVelocity body
                             , movement = player.movement
+                            , time = player.time
                             }
 
                     _ ->
@@ -243,9 +248,10 @@ updateFromFrontend sessionId clientId msg model =
                                         , clients = Set.singleton clientId
                                         , id = model.nextId
                                         , movement = Vector2d.zero
+                                        , time = Time.millisToPosix 0
                                         }
                                     )
-                                    |> Physics.Body.withFrame (Frame3d.atPoint (Point3d.inches 0 (model.nextId * 3 |> toFloat) 5))
+                                    |> Physics.Body.withFrame (Frame3d.atPoint (Point3d.inches 0 (model.nextId * 3 |> toFloat) 25))
                                     |> Physics.Body.withBehavior (Physics.Body.dynamic (Mass.kilograms 1) Vector3d.zero Vector3d.zero)
                                     |> Physics.Body.withMaterial (Physics.Material.custom { friction = Constants.friction, bounciness = Constants.bounciness })
                                     |> Physics.Body.withDamping { linear = Constants.dampingLinear, angular = Constants.dampingAngular }
@@ -255,13 +261,10 @@ updateFromFrontend sessionId clientId msg model =
                     | world = newWorld
                     , nextId = model.nextId + 1
                   }
-                , Cmd.batch
-                    [ Lamdera.sendToFrontend sessionId (AssignId model.nextId)
-                    , Lamdera.broadcast (UpdateEntities (getWirableWorldState newWorld))
-                    ]
+                , Lamdera.sendToFrontend sessionId (AssignId model.nextId)
                 )
 
-        UpdateMovement movement ->
+        UpdateMovement movement time ->
             let
                 newModel =
                     { model
@@ -271,7 +274,7 @@ updateFromFrontend sessionId clientId msg model =
                                     (mapPlayerData
                                         (\player ->
                                             if player.sessionId == sessionId then
-                                                { player | movement = movement }
+                                                { player | movement = movement, time = time }
 
                                             else
                                                 player

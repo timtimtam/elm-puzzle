@@ -46,6 +46,7 @@ type WorldData
     | Player
         { id : Int
         , movement : Vector2d.Vector2d Quantity.Unitless Physics.Coordinates.WorldCoordinates
+        , time : Time.Posix
         }
 
 
@@ -54,6 +55,7 @@ type BackendWorldData
     | BackendPlayer
         { id : Int
         , movement : Vector2d.Vector2d Quantity.Unitless Physics.Coordinates.WorldCoordinates
+        , time : Time.Posix
         , sessionId : Lamdera.SessionId
         , clients : Set Lamdera.ClientId
         }
@@ -72,6 +74,8 @@ type FrontendModel
         , name : String
         , width : Quantity.Quantity Int Pixels.Pixels
         , height : Quantity.Quantity Int Pixels.Pixels
+        , playerColorTexture : Maybe (Scene3d.Material.Texture Color.Color)
+        , playerRoughnessTexture : Maybe (Scene3d.Material.Texture Float)
         , cameraAngle : Direction3d.Direction3d Physics.Coordinates.WorldCoordinates
         , leftKey : ButtonState
         , rightKey : ButtonState
@@ -79,6 +83,7 @@ type FrontendModel
         , downKey : ButtonState
         , mouseButtonState : ButtonState
         , touches : TouchContact
+        , currentTime : Time.Posix
         , world :
             Physics.World.World
                 WorldData
@@ -87,8 +92,7 @@ type FrontendModel
         , lightPosition : Point3d.Point3d Length.Meters Physics.Coordinates.WorldCoordinates
         , lastContact : ContactType
         , pointerCapture : PointerCapture
-        , playerColorTexture : Maybe (Scene3d.Material.Texture Color.Color)
-        , playerRoughnessTexture : Maybe (Scene3d.Material.Texture Float)
+        , historicalMovements : List { movement : Vector2d.Vector2d Quantity.Unitless Physics.Coordinates.WorldCoordinates, time : Time.Posix }
         }
 
 
@@ -113,7 +117,7 @@ type ArrowKey
 
 type FrontendMsg
     = WindowResized (Quantity.Quantity Int Pixels.Pixels) (Quantity.Quantity Int Pixels.Pixels)
-    | Tick Duration.Duration
+    | Tick Time.Posix
     | MouseMoved (Vector2d.Vector2d Pixels.Pixels ScreenCoordinates)
     | MouseDown
     | MouseUp
@@ -125,12 +129,21 @@ type FrontendMsg
     | LostPointerLock
     | GotColorTexture (Result WebGL.Texture.Error (Scene3d.Material.Texture Color.Color))
     | GotRoughnessTexture (Result WebGL.Texture.Error (Scene3d.Material.Texture Float))
+    | JoinedAtTime
+        Time.Posix
+        Int
+        { name : String
+        , width : Quantity.Quantity Int Pixels.Pixels
+        , height : Quantity.Quantity Int Pixels.Pixels
+        , playerColorTexture : Maybe (Scene3d.Material.Texture Color.Color)
+        , playerRoughnessTexture : Maybe (Scene3d.Material.Texture Float)
+        }
     | NoOpFrontendMsg
 
 
 type ToBackend
     = Join String
-    | UpdateMovement (Vector2d.Vector2d Quantity.Unitless Physics.Coordinates.WorldCoordinates)
+    | UpdateMovement (Vector2d.Vector2d Quantity.Unitless Physics.Coordinates.WorldCoordinates) Time.Posix
     | NoOpToBackend
 
 
@@ -150,6 +163,7 @@ type ToFrontend
             , velocity : Vector3d.Vector3d Speed.MetersPerSecond Physics.Coordinates.WorldCoordinates
             , angularVelocity : Vector3d.Vector3d AngularSpeed.RadiansPerSecond Physics.Coordinates.WorldCoordinates
             , movement : Vector2d.Vector2d Quantity.Unitless Physics.Coordinates.WorldCoordinates
+            , time : Time.Posix
             }
         )
     | NoOpToFrontend

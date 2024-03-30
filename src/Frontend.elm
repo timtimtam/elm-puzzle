@@ -23,6 +23,7 @@ import Html.Events
 import Html.Events.Extra.Touch
 import Html.Lazy
 import Illuminance
+import Iso8601
 import Json.Decode
 import Json.Encode
 import Keyboard.Event
@@ -54,6 +55,7 @@ import Sphere3d
 import Svg
 import Svg.Attributes
 import Task
+import Time
 import Types exposing (..)
 import Url
 import Vector2d
@@ -144,24 +146,47 @@ cameraFrame3d position angle =
 
 
 simulate :
-    Duration.Duration
-    -> Physics.World.World WorldData
-    -> Physics.World.World WorldData
-simulate duration world =
-    world
-        |> Physics.World.update
-            (\body ->
-                case Physics.Body.data body of
-                    Player { movement } ->
-                        body |> SharedLogic.applyMovementForce movement
+    Time.Posix
+    ->
+        { time : Time.Posix
+        , world :
+            Physics.World.World WorldData
+        }
+    ->
+        { time : Time.Posix
+        , world :
+            Physics.World.World WorldData
+        }
+simulate endTime context =
+    let
+        duration =
+            Duration.from context.time endTime
+    in
+    if Quantity.lessThanOrEqualToZero duration then
+        { time = endTime
+        , world = context.world
+        }
 
-                    _ ->
-                        body
-            )
-        |> Physics.World.simulate duration
+    else
+        { time = duration |> Duration.addTo context.time
+        , world =
+            context.world
+                |> Physics.World.update
+                    (\body ->
+                        case Physics.Body.data body of
+                            Player player ->
+                                body
+                                    |> SharedLogic.applyMovementForce player.movement
+                                    |> Physics.Body.withData (Player { player | time = duration |> Duration.addTo player.time })
+
+                            _ ->
+                                body
+                    )
+                |> Physics.World.simulate duration
+        }
 
 
-update : FrontendMsg -> FrontendModel -> ( FrontendModel, Cmd msg )
+update : FrontendMsg -> FrontendModel -> ( FrontendModel, Cmd FrontendMsg )
 update msg outerModel =
     case ( outerModel, msg ) of
         ( Lobby model, WindowResized w h ) ->
@@ -170,7 +195,7 @@ update msg outerModel =
         ( Joined model, WindowResized w h ) ->
             ( Joined { model | width = w, height = h }, Cmd.none )
 
-        ( Joined model, Tick duration ) ->
+        ( Joined model, Tick frameEndTime ) ->
             let
                 angleDeltaVector =
                     model.viewPivotDelta
@@ -196,22 +221,26 @@ update msg outerModel =
                         |> Vector2d.rotateBy (Angle.turns 0.5)
 
                 world =
-                    model.world
-                        |> Physics.World.update
-                            (\body ->
-                                case Physics.Body.data body of
-                                    Player data ->
-                                        if data.id == model.id then
-                                            body
-                                                |> Physics.Body.withData (Player { data | movement = movement })
+                    simulate
+                        frameEndTime
+                        { time = model.currentTime
+                        , world =
+                            model.world
+                                |> Physics.World.update
+                                    (\body ->
+                                        case Physics.Body.data body of
+                                            Player data ->
+                                                if data.id == model.id then
+                                                    body
+                                                        |> Physics.Body.withData (Player { data | movement = movement })
 
-                                        else
-                                            body
+                                                else
+                                                    body
 
-                                    _ ->
-                                        body
-                            )
-                        |> simulate duration
+                                            _ ->
+                                                body
+                                    )
+                        }
             in
             cameraFrame3d Point3d.origin model.cameraAngle
                 |> Maybe.map
@@ -225,11 +254,13 @@ update msg outerModel =
                         in
                         ( Joined
                             { model
-                                | world = world
+                                | currentTime = frameEndTime
+                                , world = world.world
                                 , viewPivotDelta = Vector2d.zero
                                 , cameraAngle = newAngle
+                                , historicalMovements = { movement = movement, time = frameEndTime } :: model.historicalMovements
                             }
-                        , Lamdera.sendToBackend (UpdateMovement movement)
+                        , Lamdera.sendToBackend (UpdateMovement movement model.currentTime)
                         )
                     )
                 |> Maybe.withDefault ( Joined model, Cmd.none )
@@ -368,6 +399,9 @@ update msg outerModel =
         ( _, NoOpFrontendMsg ) ->
             ( outerModel, Cmd.none )
 
+        ( _, JoinedAtTime time id params ) ->
+            ( createJoinedModel time id params, Cmd.none )
+
         ( Lobby _, _ ) ->
             ( outerModel, Cmd.none )
 
@@ -391,17 +425,18 @@ playersToWorld :
         , velocity : Vector3d.Vector3d Speed.MetersPerSecond Physics.Coordinates.WorldCoordinates
         , angularVelocity : Vector3d.Vector3d AngularSpeed.RadiansPerSecond Physics.Coordinates.WorldCoordinates
         , movement : Vector2d.Vector2d Quantity.Unitless Physics.Coordinates.WorldCoordinates
+        , time : Time.Posix
         }
     -> Physics.World.World WorldData
 playersToWorld players =
     players
         |> List.foldl
-            (\{ id, frame, velocity, angularVelocity, movement } world ->
+            (\{ id, frame, velocity, angularVelocity, movement, time } world ->
                 world
                     |> Physics.World.add
                         (Physics.Body.sphere
                             (Sphere3d.atOrigin (Length.inches 1))
-                            (Player { id = id, movement = movement })
+                            (Player { id = id, movement = movement, time = time })
                             |> Physics.Body.withFrame frame
                             |> Physics.Body.withBehavior (Physics.Body.dynamic (Mass.kilograms 1) velocity angularVelocity)
                             |> Physics.Body.withMaterial (Physics.Material.custom { friction = Constants.friction, bounciness = Constants.bounciness })
@@ -411,59 +446,114 @@ playersToWorld players =
             baseWorld
 
 
+createJoinedModel time id { width, height, playerColorTexture, playerRoughnessTexture } =
+    Joined
+        { id = id
+        , name = "bob"
+        , width = width
+        , height = height
+        , playerColorTexture = playerColorTexture
+        , playerRoughnessTexture = playerRoughnessTexture
+        , cameraAngle = Maybe.withDefault Direction3d.positiveX (Direction3d.from (Point3d.inches 0 0 0) (Point3d.inches 5 -4 2))
+        , mouseButtonState = Up
+        , leftKey = Up
+        , rightKey = Up
+        , upKey = Up
+        , downKey = Up
+        , joystickOffset = Vector2d.zero
+        , viewPivotDelta = Vector2d.zero
+        , lightPosition = ( 3, 3, 3 ) |> Point3d.fromTuple Length.inches
+        , touches = NotOneFinger
+        , lastContact = Mouse
+        , historicalMovements = []
+        , pointerCapture = PointerNotLocked
+        , currentTime = time
+        , world = baseWorld
+        }
+
+
 updateFromBackend msg outerModel =
     case ( outerModel, msg ) of
         ( Joined model, UpdateEntities entities ) ->
-            ( Joined { model | world = playersToWorld entities }, Cmd.none )
+            let
+                maybeOriginalTime =
+                    entities
+                        |> List.Extra.find (\{ id } -> id == model.id)
+                        |> Maybe.map
+                            (\{ time } ->
+                                time
+                            )
 
-        ( Lobby model, AssignId id ) ->
+                maybeHistoricalMovements =
+                    maybeOriginalTime
+                        |> Maybe.map
+                            (\originalTime ->
+                                let
+                                    return =
+                                        model.historicalMovements
+                                            |> List.filter (\{ time } -> Time.posixToMillis time > Time.posixToMillis originalTime)
+                                            |> List.sortBy (\{ time } -> Time.posixToMillis time)
+                                in
+                                return
+                            )
+
+                newWorld =
+                    Maybe.map2
+                        (\movements startTime ->
+                            movements
+                                |> List.foldl
+                                    (\{ movement, time } world ->
+                                        { world =
+                                            world.world
+                                                |> Physics.World.update
+                                                    (\body ->
+                                                        case Physics.Body.data body of
+                                                            Player player ->
+                                                                if player.id == model.id then
+                                                                    body |> Physics.Body.withData (Player { player | movement = movement })
+
+                                                                else
+                                                                    body
+
+                                                            _ ->
+                                                                body
+                                                    )
+                                        , time = world.time
+                                        }
+                                            |> simulate time
+                                    )
+                                    { world = playersToWorld entities, time = startTime }
+                        )
+                        maybeHistoricalMovements
+                        maybeOriginalTime
+            in
             ( Joined
-                { id = id
-                , name = "bob"
-                , width = model.width
-                , height = model.height
-                , playerColorTexture = model.playerColorTexture
-                , playerRoughnessTexture = model.playerRoughnessTexture
-                , cameraAngle = Maybe.withDefault Direction3d.positiveX (Direction3d.from (Point3d.inches 0 0 0) (Point3d.inches 5 -4 2))
-                , mouseButtonState = Up
-                , leftKey = Up
-                , rightKey = Up
-                , upKey = Up
-                , downKey = Up
-                , joystickOffset = Vector2d.zero
-                , viewPivotDelta = Vector2d.zero
-                , lightPosition = ( 3, 3, 3 ) |> Point3d.fromTuple Length.inches
-                , touches = NotOneFinger
-                , lastContact = Mouse
-                , pointerCapture = PointerNotLocked
-                , world = baseWorld
+                { model
+                    | world = newWorld |> Maybe.map .world |> Maybe.withDefault (playersToWorld entities)
+                    , historicalMovements = maybeHistoricalMovements |> Maybe.withDefault []
                 }
             , Cmd.none
             )
 
+        ( Lobby model, AssignId id ) ->
+            ( Lobby model
+            , Time.now |> Task.perform (\time -> JoinedAtTime time id model)
+            )
+
         ( Joined model, AssignId id ) ->
-            ( Joined
-                { id = id
-                , name = "bob"
-                , width = model.width
-                , height = model.height
-                , playerColorTexture = model.playerColorTexture
-                , playerRoughnessTexture = model.playerRoughnessTexture
-                , cameraAngle = Maybe.withDefault Direction3d.positiveX (Direction3d.from (Point3d.inches 0 0 0) (Point3d.inches 5 -4 2))
-                , mouseButtonState = Up
-                , leftKey = Up
-                , rightKey = Up
-                , upKey = Up
-                , downKey = Up
-                , joystickOffset = Vector2d.zero
-                , viewPivotDelta = Vector2d.zero
-                , lightPosition = ( 3, 3, 3 ) |> Point3d.fromTuple Length.inches
-                , touches = NotOneFinger
-                , lastContact = Mouse
-                , pointerCapture = PointerNotLocked
-                , world = baseWorld
-                }
-            , Cmd.none
+            ( Joined model
+            , Time.now
+                |> Task.perform
+                    (\time ->
+                        JoinedAtTime time
+                            id
+                            { name = "bob"
+                            , width = model.width
+                            , height = model.height
+                            , playerColorTexture = model.playerColorTexture
+                            , playerRoughnessTexture = model.playerRoughnessTexture
+                            }
+                    )
             )
 
         ( Lobby _, _ ) ->
@@ -534,7 +624,7 @@ capVector2d vector =
 
 view : FrontendModel -> Browser.Document FrontendMsg
 view model =
-    { title = "Clankers"
+    { title = "Clunkers"
     , body =
         case model of
             Lobby _ ->
@@ -553,7 +643,8 @@ view model =
                     ]
                     [ Html.Lazy.lazy renderScene
                         { id = id
-                        , entities = Physics.World.bodies world
+                        , entities =
+                            Physics.World.bodies world
                         , playerColorTexture = playerColorTexture
                         , lightPosition = lightPosition
                         , cameraAngle = cameraAngle
@@ -719,8 +810,23 @@ renderScene { entities, id, playerColorTexture, lightPosition, cameraAngle, widt
             List.concat
                 [ [ lightEntity
                         |> Scene3d.translateBy (Vector3d.from Point3d.origin lightPosition)
+                  , Scene3d.quad
+                        (case playerColorTexture of
+                            Just texture ->
+                                Scene3d.Material.texturedPbr
+                                    { baseColor = texture
+                                    , roughness = Scene3d.Material.constant 0.5
+                                    , metallic = Scene3d.Material.constant 0.5
+                                    }
+
+                            Nothing ->
+                                Scene3d.Material.nonmetal { baseColor = Color.gray, roughness = 0 }
+                        )
+                        (Point3d.inches -worldSize -worldSize 0)
+                        (Point3d.inches worldSize -worldSize 0)
+                        (Point3d.inches worldSize worldSize 0)
+                        (Point3d.inches -worldSize worldSize 0)
                   ]
-                , staticEntities
                 , entities
                     |> List.filterMap
                         (\entity ->
@@ -767,15 +873,6 @@ lightEntity =
 
 worldSize =
     64
-
-
-staticEntities =
-    [ Scene3d.quad (Scene3d.Material.matte Color.blue)
-        (Point3d.inches -worldSize -worldSize 0)
-        (Point3d.inches worldSize -worldSize 0)
-        (Point3d.inches worldSize worldSize 0)
-        (Point3d.inches -worldSize worldSize 0)
-    ]
 
 
 handleArrowKey : Keyboard.Event.KeyboardEvent -> Maybe ArrowKey
@@ -825,10 +922,9 @@ subscriptions _ =
             (Keyboard.Event.considerKeyboardEvent
                 (\event -> Maybe.map (\key -> ArrowKeyChanged key Up) (handleArrowKey event))
             )
-        , Browser.Events.onAnimationFrameDelta
-            (\milliseconds ->
-                Tick (Duration.milliseconds milliseconds)
-            )
+        , Browser.Events.onAnimationFrame Tick
+
+        -- , Time.every 100 Tick
         , gotPointerLock
             (\value ->
                 case value |> Json.decodeValue (Json.Decode.field "msg" Json.Decode.string) of
