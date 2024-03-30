@@ -252,8 +252,12 @@ updateFromFrontend sessionId clientId msg model =
                                         , time = Time.millisToPosix 0
                                         }
                                     )
-                                    |> Physics.Body.withFrame (Frame3d.atPoint (Point3d.inches 0 (model.nextId * 3 |> toFloat) 25))
-                                    |> Physics.Body.withBehavior (Physics.Body.dynamic (Mass.kilograms 1) (Vector3d.fromTuple Speed.feetPerSecond ( 0.1, 0.1, 2 )) Vector3d.zero)
+                                    |> Physics.Body.withFrame (Frame3d.atPoint (Point3d.inches 0 (model.nextId * 3 |> toFloat) 1000))
+                                    |> Physics.Body.withBehavior
+                                        (Physics.Body.dynamic (Mass.kilograms 1)
+                                            (Vector3d.fromTuple Speed.feetPerSecond ( 0.1, 0.1, 2 ))
+                                            Vector3d.zero
+                                        )
                                     |> Physics.Body.withMaterial (Physics.Material.custom { friction = Constants.friction, bounciness = Constants.bounciness })
                                     |> Physics.Body.withDamping { linear = Constants.dampingLinear, angular = Constants.dampingAngular }
                                 )
