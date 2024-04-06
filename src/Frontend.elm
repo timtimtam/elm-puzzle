@@ -3,7 +3,7 @@ port module Frontend exposing (app)
 import Angle
 import AngularSpeed
 import Axis2d
-import Axis3d exposing (Axis3d)
+import Axis3d
 import Browser
 import Browser.Dom
 import Browser.Events
@@ -24,7 +24,6 @@ import Html.Events
 import Html.Events.Extra.Touch
 import Html.Lazy
 import Illuminance
-import Internal.Transform3d exposing (Orientation3d)
 import Iso8601
 import Json.Decode
 import Json.Encode
@@ -50,7 +49,6 @@ import Scene3d
 import Scene3d.Entity
 import Scene3d.Light
 import Scene3d.Material
-import Scene3d.Transformation
 import SketchPlane3d
 import Speed
 import Sphere3d
@@ -144,54 +142,6 @@ cameraFrame3d position angle =
             )
 
 
-interpolateBetweenDirection3ds : Float -> Direction3d.Direction3d coordinates -> Direction3d.Direction3d coordinates -> Vector3d.Vector3d Length.Meters coordinates
-interpolateBetweenDirection3ds amount direction1 direction2 =
-    let
-        angle =
-            direction2 |> Direction3d.angleFrom direction1
-
-        vector1 =
-            direction1 |> Vector3d.withLength Length.meter
-
-        vector2 =
-            direction2 |> Vector3d.withLength Length.meter
-
-        maybeAxis =
-            (vector1
-                |> Vector3d.cross vector2
-                |> Vector3d.direction
-            )
-                |> Maybe.map (Axis3d.through Point3d.origin)
-    in
-    maybeAxis
-        |> Maybe.map (\axis -> vector1 |> Vector3d.rotateAround axis (angle |> Quantity.timesUnitless (Quantity.float amount)))
-        |> Maybe.withDefault vector1
-
-
-rerotateFrame3d quantity frame =
-    let
-        xVector =
-            interpolateBetweenDirection3ds quantity (Frame3d.xDirection frame) Direction3d.x
-
-        yVector =
-            interpolateBetweenDirection3ds quantity (Frame3d.yDirection frame) Direction3d.y
-
-        zVector =
-            interpolateBetweenDirection3ds quantity (Frame3d.zDirection frame) Direction3d.z
-    in
-    Direction3d.orthonormalize xVector yVector zVector
-        |> Maybe.map
-            (\( x, y, z ) ->
-                Frame3d.unsafe
-                    { originPoint = Point3d.origin
-                    , xDirection = x
-                    , yDirection = y
-                    , zDirection = z
-                    }
-            )
-        |> Maybe.withDefault Frame3d.atOrigin
-
-
 torqueFromMovement : Vector2d.Vector2d Quantity.Unitless coordinates2d -> Vector3d.Vector3d Torque.NewtonMeters coordinates
 torqueFromMovement movement =
     (if Vector2d.length movement |> Quantity.greaterThan (Quantity.float 1) then
@@ -281,11 +231,6 @@ update msg outerModel =
                             )
                         |> Vector2d.rotateBy (Angle.turns 0.5)
                         |> torqueFromMovement
-
-                reconFraction =
-                    Duration.from model.currentTime frameEndTime
-                        |> Quantity.at Constants.reconRate
-                        |> Quantity.toFloat
 
                 world =
                     simulate
@@ -431,7 +376,7 @@ update msg outerModel =
                     case contact of
                         OneFinger { screenPos } ->
                             Vector2d.from (getJoystickOrigin model.height) screenPos
-                                |> Vector2d.at_ pixelsPerJoystickWidth
+                                |> Vector2d.at_ Constants.pixelsPerJoystickWidth
 
                         NotOneFinger ->
                             Vector2d.zero
@@ -558,72 +503,6 @@ createJoinedModel time id { width, height, playerColorTexture, playerRoughnessTe
         , currentTime = time
         , world = baseWorld
         }
-
-
-orientationFromFrame : Frame3d.Frame3d units coordinates defines -> Internal.Transform3d.Orientation3d
-orientationFromFrame frame =
-    let
-        origin =
-            frame
-                |> Frame3d.originPoint
-
-        transform =
-            Internal.Transform3d.fromOriginAndBasis
-                (origin |> Point3d.unwrap)
-                (frame |> Frame3d.xDirection |> Direction3d.unwrap)
-                (frame |> Frame3d.yDirection |> Direction3d.unwrap)
-                (frame |> Frame3d.zDirection |> Direction3d.unwrap)
-    in
-    case transform of
-        Internal.Transform3d.Transform3d _ orientation ->
-            orientation
-
-
-rotateFrame : Internal.Transform3d.Orientation3d -> Frame3d.Frame3d units coordinates defines -> Frame3d.Frame3d units coordinates defines
-rotateFrame orientation frame =
-    let
-        x =
-            frame |> Frame3d.xDirection |> Direction3d.unwrap |> Internal.Transform3d.rotate orientation |> Vector3d.unsafe
-
-        y =
-            frame |> Frame3d.yDirection |> Direction3d.unwrap |> Internal.Transform3d.rotate orientation |> Vector3d.unsafe
-
-        z =
-            frame |> Frame3d.zDirection |> Direction3d.unwrap |> Internal.Transform3d.rotate orientation |> Vector3d.unsafe
-    in
-    Direction3d.orthonormalize x y z
-        |> Maybe.map
-            (\( a, b, c ) ->
-                Frame3d.unsafe
-                    { originPoint = frame |> Frame3d.originPoint
-                    , xDirection = a
-                    , yDirection = b
-                    , zDirection = c
-                    }
-            )
-        |> Maybe.withDefault frame
-
-
-slerp : Internal.Transform3d.Orientation3d -> Float -> Internal.Transform3d.Orientation3d -> Internal.Transform3d.Orientation3d
-slerp (Internal.Transform3d.Orientation3d ax ay az aw) t (Internal.Transform3d.Orientation3d bx by bz bw) =
-    let
-        angle =
-            Basics.acos (ax * bx + ay * by + az * bz + aw * bw)
-
-        denominator =
-            Basics.sin angle
-
-        am =
-            Basics.sin ((1 - t) * angle) / denominator
-
-        bm =
-            Basics.sin (t * angle) / denominator
-    in
-    Internal.Transform3d.Orientation3d
-        (ax * am + bx * bm)
-        (ay * am + by * bm)
-        (az * am + bz * bm)
-        (aw * am + bw * bm)
 
 
 getRecon :
@@ -854,14 +733,6 @@ getJoystickOrigin height =
         (height |> Quantity.toFloatQuantity |> Quantity.minus (Pixels.float 70))
 
 
-joystickSize =
-    Pixels.float 20
-
-
-pixelsPerJoystickWidth =
-    Pixels.float 40 |> Quantity.per (Quantity.float 1)
-
-
 getShootButtonLocation width height =
     Point2d.xy
         (width |> Quantity.toFloatQuantity |> Quantity.minus (Pixels.float 100))
@@ -877,14 +748,15 @@ getCrossHairLocation width height =
 crossHair width height =
     Geometry.Svg.circle2d
         [ Svg.Attributes.fill (Color.toCssString (Color.fromRgba { red = 0, blue = 0, green = 0, alpha = 0 }))
-        , Svg.Attributes.strokeWidth (joystickSize |> Quantity.divideBy 8 |> Pixels.inPixels |> String.fromFloat)
+        , Svg.Attributes.strokeWidth (Constants.joystickSize |> Quantity.divideBy 8 |> Pixels.inPixels |> String.fromFloat)
         , Svg.Attributes.stroke "white"
         , Svg.Attributes.strokeOpacity "0.5"
         , Html.Events.onClick ShootClicked
         ]
-        (getCrossHairLocation width height |> Circle2d.withRadius (joystickSize |> Quantity.divideBy 3))
+        (getCrossHairLocation width height |> Circle2d.withRadius (Constants.joystickSize |> Quantity.divideBy 3))
 
 
+capVector2d : Vector2d.Vector2d Quantity.Unitless coordinates -> Vector2d.Vector2d Quantity.Unitless coordinates
 capVector2d vector =
     if vector |> Vector2d.length |> Quantity.greaterThan (Quantity.float 1) then
         Vector2d.normalize vector
@@ -973,8 +845,8 @@ view model =
                                 [ Geometry.Svg.circle2d
                                     [ Svg.Attributes.fill (Color.toCssString (Color.fromRgba { red = 0, blue = 0, green = 0, alpha = 0.2 }))
                                     ]
-                                    (Circle2d.withRadius joystickSize
-                                        (joystickOrigin |> Point2d.translateBy (joystickCapped |> Vector2d.at pixelsPerJoystickWidth))
+                                    (Circle2d.withRadius Constants.joystickSize
+                                        (joystickOrigin |> Point2d.translateBy (joystickCapped |> Vector2d.at Constants.pixelsPerJoystickWidth))
                                     )
                                 , Geometry.Svg.circle2d
                                     [ Svg.Attributes.fill (Color.toCssString (Color.fromRgba { red = 0, blue = 0, green = 0, alpha = 0.2 }))
@@ -988,12 +860,12 @@ view model =
                                         { preventDefault = True, stopPropagation = True }
                                         (\event -> JoystickTouchChanged (toTouchMsg event))
                                     ]
-                                    (Circle2d.withRadius (Quantity.float 1 |> Quantity.at pixelsPerJoystickWidth) joystickOrigin)
+                                    (Circle2d.withRadius (Quantity.float 1 |> Quantity.at Constants.pixelsPerJoystickWidth) joystickOrigin)
                                 , Geometry.Svg.circle2d
                                     [ Svg.Attributes.fill (Color.toCssString (Color.fromRgba { red = 0, blue = 0, green = 0, alpha = 0.2 }))
                                     , Html.Events.onClick ShootClicked
                                     ]
-                                    (Circle2d.withRadius joystickSize (getShootButtonLocation width height))
+                                    (Circle2d.withRadius Constants.joystickSize (getShootButtonLocation width height))
                                 , crossHair width height
                                 ]
 
