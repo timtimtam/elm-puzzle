@@ -3,6 +3,7 @@ module Internal.Body exposing
     , Protected(..)
     , applyForce
     , applyImpulse
+    , applyTorque
     , compound
     , raycast
     , updateMassProperties
@@ -237,6 +238,11 @@ applyForce amount direction point body =
         | force = Vec3.add body.force force
         , torque = Vec3.add body.torque torque
     }
+
+
+applyTorque : Vec3 -> Body data -> Body data
+applyTorque torque body =
+    { body | torque = Vec3.add body.torque torque }
 
 
 raycast :

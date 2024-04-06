@@ -3,6 +3,7 @@ port module Frontend exposing (app)
 import Angle
 import AngularSpeed
 import Axis2d
+import Axis3d exposing (Axis3d)
 import Browser
 import Browser.Dom
 import Browser.Events
@@ -23,6 +24,7 @@ import Html.Events
 import Html.Events.Extra.Touch
 import Html.Lazy
 import Illuminance
+import Internal.Transform3d exposing (Orientation3d)
 import Iso8601
 import Json.Decode
 import Json.Encode
@@ -48,7 +50,7 @@ import Scene3d
 import Scene3d.Entity
 import Scene3d.Light
 import Scene3d.Material
-import SharedLogic
+import Scene3d.Transformation
 import SketchPlane3d
 import Speed
 import Sphere3d
@@ -56,6 +58,7 @@ import Svg
 import Svg.Attributes
 import Task
 import Time
+import Torque
 import Types exposing (..)
 import Url
 import Vector2d
@@ -114,10 +117,6 @@ type PlayerCoordinates
     = PlayerCoordinates
 
 
-radiansPerPixel =
-    Angle.radians -0.004 |> Quantity.per (Pixels.float 1)
-
-
 cameraFrame3d :
     Point3d.Point3d Length.Meters Physics.Coordinates.WorldCoordinates
     -> Direction3d.Direction3d Physics.Coordinates.WorldCoordinates
@@ -143,6 +142,68 @@ cameraFrame3d position angle =
                     , zDirection = playerUp
                     }
             )
+
+
+interpolateBetweenDirection3ds : Float -> Direction3d.Direction3d coordinates -> Direction3d.Direction3d coordinates -> Vector3d.Vector3d Length.Meters coordinates
+interpolateBetweenDirection3ds amount direction1 direction2 =
+    let
+        angle =
+            direction2 |> Direction3d.angleFrom direction1
+
+        vector1 =
+            direction1 |> Vector3d.withLength Length.meter
+
+        vector2 =
+            direction2 |> Vector3d.withLength Length.meter
+
+        maybeAxis =
+            (vector1
+                |> Vector3d.cross vector2
+                |> Vector3d.direction
+            )
+                |> Maybe.map (Axis3d.through Point3d.origin)
+    in
+    maybeAxis
+        |> Maybe.map (\axis -> vector1 |> Vector3d.rotateAround axis (angle |> Quantity.timesUnitless (Quantity.float amount)))
+        |> Maybe.withDefault vector1
+
+
+rerotateFrame3d quantity frame =
+    let
+        xVector =
+            interpolateBetweenDirection3ds quantity (Frame3d.xDirection frame) Direction3d.x
+
+        yVector =
+            interpolateBetweenDirection3ds quantity (Frame3d.yDirection frame) Direction3d.y
+
+        zVector =
+            interpolateBetweenDirection3ds quantity (Frame3d.zDirection frame) Direction3d.z
+    in
+    Direction3d.orthonormalize xVector yVector zVector
+        |> Maybe.map
+            (\( x, y, z ) ->
+                Frame3d.unsafe
+                    { originPoint = Point3d.origin
+                    , xDirection = x
+                    , yDirection = y
+                    , zDirection = z
+                    }
+            )
+        |> Maybe.withDefault Frame3d.atOrigin
+
+
+torqueFromMovement : Vector2d.Vector2d Quantity.Unitless coordinates2d -> Vector3d.Vector3d Torque.NewtonMeters coordinates
+torqueFromMovement movement =
+    (if Vector2d.length movement |> Quantity.greaterThan (Quantity.float 1) then
+        Vector2d.normalize movement
+
+     else
+        movement
+    )
+        |> Vector2d.rotateBy (Angle.turns 0.25)
+        |> Vector3d.on SketchPlane3d.xy
+        |> Vector3d.times Constants.maxTorque
+        |> Vector3d.over (Quantity.float 1)
 
 
 simulate :
@@ -176,8 +237,13 @@ simulate endTime context =
                         case Physics.Body.data body of
                             Player player ->
                                 body
-                                    |> SharedLogic.applyMovementForce player.movement
-                                    |> Physics.Body.withData (Player { player | time = duration |> Duration.addTo player.time })
+                                    |> Physics.Body.applyTorque player.torque
+                                    |> Physics.Body.withData
+                                        (Player
+                                            { player
+                                                | localTime = duration |> Duration.addTo player.localTime
+                                            }
+                                        )
 
                             _ ->
                                 body
@@ -199,16 +265,11 @@ update msg outerModel =
             let
                 angleDeltaVector =
                     model.viewPivotDelta
-                        |> Vector2d.at radiansPerPixel
+                        |> Vector2d.at Constants.radiansPerPixel
                         |> Vector2d.mirrorAcross Axis2d.x
 
-                movement =
-                    (if Vector2d.length model.joystickOffset |> Quantity.greaterThan (Quantity.float 1) then
-                        Vector2d.normalize model.joystickOffset
-
-                     else
-                        model.joystickOffset
-                    )
+                torque =
+                    model.joystickOffset
                         |> Vector2d.mirrorAcross Axis2d.x
                         |> Vector2d.placeIn
                             (Frame2d.withYDirection
@@ -219,6 +280,12 @@ update msg outerModel =
                                 Point2d.origin
                             )
                         |> Vector2d.rotateBy (Angle.turns 0.5)
+                        |> torqueFromMovement
+
+                reconFraction =
+                    Duration.from model.currentTime frameEndTime
+                        |> Quantity.at Constants.reconRate
+                        |> Quantity.toFloat
 
                 world =
                     simulate
@@ -232,7 +299,13 @@ update msg outerModel =
                                             Player data ->
                                                 if data.id == model.id then
                                                     body
-                                                        |> Physics.Body.withData (Player { data | movement = movement })
+                                                        |> Physics.Body.withData
+                                                            (Player
+                                                                { data
+                                                                    | torque = torque
+                                                                    , recon = scaleRecon 0.9 data.recon
+                                                                }
+                                                            )
 
                                                 else
                                                     body
@@ -258,9 +331,13 @@ update msg outerModel =
                                 , world = world.world
                                 , viewPivotDelta = Vector2d.zero
                                 , cameraAngle = newAngle
-                                , historicalMovements = { movement = movement, time = frameEndTime } :: model.historicalMovements
+                                , historicalMovements = { movement = torque, time = frameEndTime } :: model.historicalMovements
                             }
-                        , Lamdera.sendToBackend (UpdateMovement movement model.currentTime)
+                        , Lamdera.sendToBackend
+                            (UpdateMovement
+                                torque
+                                model.currentTime
+                            )
                         )
                     )
                 |> Maybe.withDefault ( Joined model, Cmd.none )
@@ -424,7 +501,7 @@ playersToWorld :
         , frame : Frame3d.Frame3d Length.Meters Physics.Coordinates.WorldCoordinates { defines : Physics.Coordinates.BodyCoordinates }
         , velocity : Vector3d.Vector3d Speed.MetersPerSecond Physics.Coordinates.WorldCoordinates
         , angularVelocity : Vector3d.Vector3d AngularSpeed.RadiansPerSecond Physics.Coordinates.WorldCoordinates
-        , movement : Vector2d.Vector2d Quantity.Unitless Physics.Coordinates.WorldCoordinates
+        , movement : Vector3d.Vector3d Torque.NewtonMeters Physics.Coordinates.WorldCoordinates
         , time : Time.Posix
         }
     -> Physics.World.World WorldData
@@ -436,7 +513,18 @@ playersToWorld players =
                     |> Physics.World.add
                         (Physics.Body.sphere
                             (Sphere3d.atOrigin (Length.inches 1))
-                            (Player { id = id, movement = movement, time = time })
+                            (Player
+                                { id = id
+                                , torque = movement
+                                , localTime = time
+                                , recon =
+                                    { direction = Direction3d.z
+                                    , angleA = Quantity.zero
+                                    , angleZ = Quantity.zero
+                                    , offset = Vector3d.zero
+                                    }
+                                }
+                            )
                             |> Physics.Body.withFrame frame
                             |> Physics.Body.withBehavior (Physics.Body.dynamic (Mass.kilograms 1) velocity angularVelocity)
                             |> Physics.Body.withMaterial (Physics.Material.custom { friction = Constants.friction, bounciness = Constants.bounciness })
@@ -470,6 +558,143 @@ createJoinedModel time id { width, height, playerColorTexture, playerRoughnessTe
         , currentTime = time
         , world = baseWorld
         }
+
+
+orientationFromFrame : Frame3d.Frame3d units coordinates defines -> Internal.Transform3d.Orientation3d
+orientationFromFrame frame =
+    let
+        origin =
+            frame
+                |> Frame3d.originPoint
+
+        transform =
+            Internal.Transform3d.fromOriginAndBasis
+                (origin |> Point3d.unwrap)
+                (frame |> Frame3d.xDirection |> Direction3d.unwrap)
+                (frame |> Frame3d.yDirection |> Direction3d.unwrap)
+                (frame |> Frame3d.zDirection |> Direction3d.unwrap)
+    in
+    case transform of
+        Internal.Transform3d.Transform3d _ orientation ->
+            orientation
+
+
+rotateFrame : Internal.Transform3d.Orientation3d -> Frame3d.Frame3d units coordinates defines -> Frame3d.Frame3d units coordinates defines
+rotateFrame orientation frame =
+    let
+        x =
+            frame |> Frame3d.xDirection |> Direction3d.unwrap |> Internal.Transform3d.rotate orientation |> Vector3d.unsafe
+
+        y =
+            frame |> Frame3d.yDirection |> Direction3d.unwrap |> Internal.Transform3d.rotate orientation |> Vector3d.unsafe
+
+        z =
+            frame |> Frame3d.zDirection |> Direction3d.unwrap |> Internal.Transform3d.rotate orientation |> Vector3d.unsafe
+    in
+    Direction3d.orthonormalize x y z
+        |> Maybe.map
+            (\( a, b, c ) ->
+                Frame3d.unsafe
+                    { originPoint = frame |> Frame3d.originPoint
+                    , xDirection = a
+                    , yDirection = b
+                    , zDirection = c
+                    }
+            )
+        |> Maybe.withDefault frame
+
+
+slerp : Internal.Transform3d.Orientation3d -> Float -> Internal.Transform3d.Orientation3d -> Internal.Transform3d.Orientation3d
+slerp (Internal.Transform3d.Orientation3d ax ay az aw) t (Internal.Transform3d.Orientation3d bx by bz bw) =
+    let
+        angle =
+            Basics.acos (ax * bx + ay * by + az * bz + aw * bw)
+
+        denominator =
+            Basics.sin angle
+
+        am =
+            Basics.sin ((1 - t) * angle) / denominator
+
+        bm =
+            Basics.sin (t * angle) / denominator
+    in
+    Internal.Transform3d.Orientation3d
+        (ax * am + bx * bm)
+        (ay * am + by * bm)
+        (az * am + bz * bm)
+        (aw * am + bw * bm)
+
+
+getRecon :
+    Frame3d.Frame3d Length.Meters Physics.Coordinates.WorldCoordinates { defines : Physics.Coordinates.BodyCoordinates }
+    -> Frame3d.Frame3d Length.Meters Physics.Coordinates.WorldCoordinates { defines : Physics.Coordinates.BodyCoordinates }
+    -> FrameRecon
+getRecon a b =
+    let
+        aZ =
+            Frame3d.zDirection a
+
+        bZ =
+            Frame3d.zDirection b
+
+        direction =
+            Vector3d.cross
+                (bZ |> Direction3d.unwrap |> Vector3d.unsafe)
+                (aZ |> Direction3d.unwrap |> Vector3d.unsafe)
+                |> Vector3d.direction
+                |> Maybe.withDefault Direction3d.z
+
+        axisAngle =
+            Direction3d.angleFrom bZ aZ
+    in
+    { direction = direction
+    , angleA = axisAngle
+    , angleZ =
+        a
+            |> Frame3d.rotateAroundOwn
+                (\f ->
+                    direction
+                        |> Axis3d.through Point3d.origin
+                        |> Axis3d.placeIn f
+                )
+                axisAngle
+            |> Frame3d.yDirection
+            |> Direction3d.angleFrom (Frame3d.yDirection b)
+    , offset =
+        Vector3d.from
+            (Frame3d.originPoint a)
+            (Frame3d.originPoint b)
+    }
+
+
+applyRecon :
+    FrameRecon
+    -> Frame3d.Frame3d Length.Meters Physics.Coordinates.WorldCoordinates { defines : Physics.Coordinates.BodyCoordinates }
+    -> Frame3d.Frame3d Length.Meters Physics.Coordinates.WorldCoordinates { defines : Physics.Coordinates.BodyCoordinates }
+applyRecon { direction, angleA, offset, angleZ } frame =
+    frame
+        |> Frame3d.rotateAroundOwn
+            (\f ->
+                direction
+                    |> Axis3d.through Point3d.origin
+                    |> Axis3d.placeIn f
+            )
+            angleA
+        |> Frame3d.rotateAroundOwn Frame3d.zAxis angleZ
+        |> Frame3d.translateBy offset
+
+
+scaleRecon :
+    Float
+    -> FrameRecon
+    -> FrameRecon
+scaleRecon amount { direction, angleA, angleZ, offset } =
+    { direction = direction
+    , angleA = angleA |> Quantity.multiplyBy amount
+    , angleZ = angleZ |> Quantity.multiplyBy amount
+    , offset = offset |> Vector3d.scaleBy amount
+    }
 
 
 updateFromBackend msg outerModel =
@@ -510,7 +735,7 @@ updateFromBackend msg outerModel =
                                                         case Physics.Body.data body of
                                                             Player player ->
                                                                 if player.id == model.id then
-                                                                    body |> Physics.Body.withData (Player { player | movement = movement })
+                                                                    body |> Physics.Body.withData (Player { player | torque = movement })
 
                                                                 else
                                                                     body
@@ -523,6 +748,52 @@ updateFromBackend msg outerModel =
                                             |> simulate time
                                     )
                                     { world = playersToWorld entities, time = startTime }
+                                |> (\{ world, time } ->
+                                        { world =
+                                            world
+                                                |> Physics.World.update
+                                                    (\serverBody ->
+                                                        case Physics.Body.data serverBody of
+                                                            Player serverPlayer ->
+                                                                let
+                                                                    serverFrame =
+                                                                        Physics.Body.frame serverBody
+
+                                                                    maybeLocalFrame =
+                                                                        Physics.World.bodies model.world
+                                                                            |> List.Extra.findMap
+                                                                                (\localBody ->
+                                                                                    case Physics.Body.data localBody of
+                                                                                        Player localPlayer ->
+                                                                                            if localPlayer.id == serverPlayer.id then
+                                                                                                Just (Physics.Body.frame localBody |> applyRecon localPlayer.recon)
+
+                                                                                            else
+                                                                                                Nothing
+
+                                                                                        _ ->
+                                                                                            Nothing
+                                                                                )
+                                                                in
+                                                                case maybeLocalFrame of
+                                                                    Just localFrame ->
+                                                                        serverBody
+                                                                            |> Physics.Body.withData
+                                                                                (Player
+                                                                                    { serverPlayer
+                                                                                        | recon = getRecon serverFrame localFrame
+                                                                                    }
+                                                                                )
+
+                                                                    Nothing ->
+                                                                        serverBody
+
+                                                            _ ->
+                                                                serverBody
+                                                    )
+                                        , time = time
+                                        }
+                                   )
                         )
                         maybeHistoricalMovements
                         maybeOriginalTime
@@ -774,16 +1045,22 @@ renderScene { entities, id, playerColorTexture, lightPosition, cameraAngle, widt
                     let
                         focalPoint =
                             entities
-                                |> List.Extra.find
+                                |> List.Extra.findMap
                                     (\body ->
                                         case Physics.Body.data body of
                                             Player data ->
-                                                data.id == id
+                                                if data.id == id then
+                                                    Just
+                                                        (Physics.Body.frame body
+                                                            |> applyRecon data.recon
+                                                        )
+
+                                                else
+                                                    Nothing
 
                                             _ ->
-                                                Basics.False
+                                                Nothing
                                     )
-                                |> Maybe.map Physics.Body.frame
                                 |> Maybe.withDefault Frame3d.atOrigin
                                 |> Frame3d.originPoint
                     in
@@ -803,7 +1080,7 @@ renderScene { entities, id, playerColorTexture, lightPosition, cameraAngle, widt
         , exposure = Scene3d.exposureValue 15
         , toneMapping = Scene3d.hableFilmicToneMapping
         , whiteBalance = Scene3d.Light.incandescent
-        , antialiasing = Scene3d.multisampling
+        , antialiasing = Scene3d.supersampling 2
         , dimensions = ( width, height )
         , background = Scene3d.backgroundColor (Color.fromRgba { red = 0.17, green = 0.17, blue = 0.19, alpha = 1 })
         , entities =
@@ -827,11 +1104,54 @@ renderScene { entities, id, playerColorTexture, lightPosition, cameraAngle, widt
                         (Point3d.inches worldSize worldSize 0)
                         (Point3d.inches -worldSize worldSize 0)
                   ]
+                , let
+                    sphere =
+                        Sphere3d.atOrigin (Length.inches 1)
+                            |> Scene3d.sphereWithShadow
+                                (case playerColorTexture of
+                                    Just texture ->
+                                        Scene3d.Material.texturedPbr
+                                            { baseColor = texture
+                                            , roughness = Scene3d.Material.constant 0
+                                            , metallic = Scene3d.Material.constant 0
+                                            }
+
+                                    Nothing ->
+                                        Scene3d.Material.nonmetal { baseColor = Color.gray, roughness = 0 }
+                                )
+
+                    a =
+                        Frame3d.atOrigin |> Frame3d.translateBy (Vector3d.inches -1 -2 1)
+
+                    b =
+                        Frame3d.atOrigin
+                            |> Frame3d.translateBy (Vector3d.inches 8 6 2)
+                            |> Frame3d.rotateAroundOwn Frame3d.xAxis (Angle.turns (1 / 4))
+                            |> Frame3d.rotateAroundOwn Frame3d.zAxis (Angle.turns (3 / 8))
+                            |> Frame3d.rotateAroundOwn Frame3d.yAxis (Angle.turns (-1 / 8))
+
+                    recon =
+                        getRecon a b
+                  in
+                  [ sphere
+                        |> Scene3d.Entity.placeIn a
+                  , sphere
+                        |> Scene3d.Entity.placeIn b
+                  , sphere
+                        |> Scene3d.Entity.placeIn
+                            (a |> applyRecon (recon |> scaleRecon 0.25))
+                  , sphere
+                        |> Scene3d.Entity.placeIn
+                            (a |> applyRecon (recon |> scaleRecon 0.5))
+                  , sphere
+                        |> Scene3d.Entity.placeIn
+                            (a |> applyRecon (recon |> scaleRecon 0.75))
+                  ]
                 , entities
                     |> List.filterMap
                         (\entity ->
                             case Physics.Body.data entity of
-                                Player _ ->
+                                Player player ->
                                     Just
                                         (Sphere3d.atOrigin (Length.inches 1)
                                             |> Scene3d.sphereWithShadow
@@ -846,7 +1166,10 @@ renderScene { entities, id, playerColorTexture, lightPosition, cameraAngle, widt
                                                     Nothing ->
                                                         Scene3d.Material.nonmetal { baseColor = Color.gray, roughness = 0 }
                                                 )
-                                            |> Scene3d.Entity.placeIn (Physics.Body.frame entity)
+                                            |> Scene3d.Entity.placeIn
+                                                (Physics.Body.frame entity
+                                                    |> applyRecon player.recon
+                                                )
                                         )
 
                                 _ ->
@@ -923,8 +1246,6 @@ subscriptions _ =
                 (\event -> Maybe.map (\key -> ArrowKeyChanged key Up) (handleArrowKey event))
             )
         , Browser.Events.onAnimationFrame Tick
-
-        -- , Time.every 100 Tick
         , gotPointerLock
             (\value ->
                 case value |> Json.decodeValue (Json.Decode.field "msg" Json.Decode.string) of

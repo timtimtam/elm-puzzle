@@ -6,7 +6,7 @@ module Physics.Body exposing
     , data, withData
     , applyForce, applyImpulse
     , withMaterial, compound, withDamping, transformWithInverseInertia
-    , withFrame
+    , applyTorque, withFrame
     )
 
 {-|
@@ -68,6 +68,7 @@ import Point3d exposing (Point3d)
 import Quantity exposing (Product, Quantity(..), Rate, Squared)
 import Speed exposing (MetersPerSecond)
 import Sphere3d exposing (Sphere3d)
+import Torque exposing (Torque)
 import Vector3d exposing (Vector3d)
 
 
@@ -529,6 +530,21 @@ applyForce (Quantity force) direction point (Protected body) =
                 force
                 (Direction3d.unwrap direction)
                 (Point3d.toMeters point)
+                body
+            )
+
+    else
+        Protected body
+
+
+{-| Apply a torque at the center of mass
+-}
+applyTorque : Vector3d.Vector3d Torque.NewtonMeters WorldCoordinates -> Body data -> Body data
+applyTorque torque (Protected body) =
+    if body.mass > 0 then
+        Protected
+            (Internal.applyTorque
+                (Vector3d.unwrap torque)
                 body
             )
 

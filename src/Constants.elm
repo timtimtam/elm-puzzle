@@ -1,6 +1,10 @@
 module Constants exposing (..)
 
 import Acceleration
+import Angle
+import Duration
+import Pixels
+import Quantity
 import Torque
 
 
@@ -26,3 +30,11 @@ friction =
 
 bounciness =
     0.5
+
+
+radiansPerPixel =
+    Angle.radians -0.004 |> Quantity.per (Pixels.float 1)
+
+
+reconRate =
+    Quantity.float 0.99 |> Quantity.per Duration.second

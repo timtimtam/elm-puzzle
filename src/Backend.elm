@@ -4,10 +4,8 @@ import Constants
 import Direction3d
 import Duration
 import Frame3d
-import Iso8601
 import Lamdera
 import Length
-import List.Extra
 import Mass
 import Physics.Body
 import Physics.Material
@@ -17,12 +15,10 @@ import Platform.Sub as Sub
 import Point3d
 import Quantity
 import Set
-import SharedLogic
 import Speed
 import Sphere3d
 import Time
 import Types exposing (..)
-import Vector2d
 import Vector3d
 
 
@@ -91,8 +87,13 @@ simulate duration world =
                 case Physics.Body.data body of
                     BackendPlayer player ->
                         body
-                            |> SharedLogic.applyMovementForce player.movement
-                            |> Physics.Body.withData (BackendPlayer { player | time = duration |> Duration.addTo player.time })
+                            |> Physics.Body.applyTorque player.torque
+                            |> Physics.Body.withData
+                                (BackendPlayer
+                                    { player
+                                        | localTime = duration |> Duration.addTo player.localTime
+                                    }
+                                )
 
                     _ ->
                         body
@@ -246,8 +247,8 @@ getWirableWorldState world =
                             , frame = Physics.Body.frame body
                             , velocity = Physics.Body.velocity body
                             , angularVelocity = Physics.Body.angularVelocity body
-                            , movement = player.movement
-                            , time = player.time
+                            , movement = player.torque
+                            , time = player.localTime
                             }
 
                     _ ->
@@ -285,8 +286,8 @@ updateFromFrontend sessionId clientId msg model =
                                         { sessionId = sessionId
                                         , clients = Set.singleton clientId
                                         , id = model.nextId
-                                        , movement = Vector2d.zero
-                                        , time = Time.millisToPosix 0
+                                        , torque = Vector3d.zero
+                                        , localTime = Time.millisToPosix 0
                                         }
                                     )
                                     |> Physics.Body.withFrame (Frame3d.atPoint (Point3d.inches 0 (model.nextId * 3 |> toFloat) 0.5))
@@ -316,7 +317,10 @@ updateFromFrontend sessionId clientId msg model =
                                     (mapPlayerData
                                         (\player ->
                                             if player.sessionId == sessionId then
-                                                { player | movement = movement, time = time }
+                                                { player
+                                                    | torque = movement
+                                                    , localTime = time
+                                                }
 
                                             else
                                                 player

@@ -7,11 +7,13 @@ module Internal.Transform3d exposing
     , directionRelativeTo
     , directionsPlaceIn
     , fromOriginAndBasis
+    , identity
     , inertiaPlaceIn
     , inertiaRotateIn
     , inverse
     , invertedInertiaRotateIn
     , moveTo
+    , mul
     , normalize
     , orientation
     , originPoint
@@ -20,6 +22,7 @@ module Internal.Transform3d exposing
     , pointRelativeTo
     , pointsPlaceIn
     , relativeTo
+    , rotate
     , rotateAroundOwn
     , rotateBy
     , translateBy

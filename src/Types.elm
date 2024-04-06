@@ -1,10 +1,13 @@
 module Types exposing (..)
 
+import Angle
 import AngularSpeed
+import Axis3d
 import Color
 import Direction3d
 import Duration
 import Frame3d
+import Internal.Transform3d
 import Lamdera
 import Length
 import Physics.Coordinates
@@ -17,6 +20,7 @@ import Scene3d.Material
 import Set exposing (Set)
 import Speed
 import Time
+import Torque
 import Vector2d
 import Vector3d
 import WebGL.Texture
@@ -41,12 +45,21 @@ type PointerCapture
     | PointerNotLocked
 
 
+type alias FrameRecon =
+    { direction : Direction3d.Direction3d Physics.Coordinates.BodyCoordinates
+    , angleA : Angle.Angle
+    , angleZ : Angle.Angle
+    , offset : Vector3d.Vector3d Length.Meters Physics.Coordinates.WorldCoordinates
+    }
+
+
 type WorldData
     = Static
     | Player
         { id : Int
-        , movement : Vector2d.Vector2d Quantity.Unitless Physics.Coordinates.WorldCoordinates
-        , time : Time.Posix
+        , torque : Vector3d.Vector3d Torque.NewtonMeters Physics.Coordinates.WorldCoordinates
+        , recon : FrameRecon
+        , localTime : Time.Posix
         }
 
 
@@ -54,8 +67,8 @@ type BackendWorldData
     = BackendStatic
     | BackendPlayer
         { id : Int
-        , movement : Vector2d.Vector2d Quantity.Unitless Physics.Coordinates.WorldCoordinates
-        , time : Time.Posix
+        , torque : Vector3d.Vector3d Torque.NewtonMeters Physics.Coordinates.WorldCoordinates
+        , localTime : Time.Posix
         , sessionId : Lamdera.SessionId
         , clients : Set Lamdera.ClientId
         }
@@ -84,15 +97,13 @@ type FrontendModel
         , mouseButtonState : ButtonState
         , touches : TouchContact
         , currentTime : Time.Posix
-        , world :
-            Physics.World.World
-                WorldData
+        , world : Physics.World.World WorldData
         , joystickOffset : Vector2d.Vector2d Quantity.Unitless ScreenCoordinates
         , viewPivotDelta : Vector2d.Vector2d Pixels.Pixels ScreenCoordinates
         , lightPosition : Point3d.Point3d Length.Meters Physics.Coordinates.WorldCoordinates
         , lastContact : ContactType
         , pointerCapture : PointerCapture
-        , historicalMovements : List { movement : Vector2d.Vector2d Quantity.Unitless Physics.Coordinates.WorldCoordinates, time : Time.Posix }
+        , historicalMovements : List { movement : Vector3d.Vector3d Torque.NewtonMeters Physics.Coordinates.WorldCoordinates, time : Time.Posix }
         }
 
 
@@ -143,7 +154,7 @@ type FrontendMsg
 
 type ToBackend
     = Join String
-    | UpdateMovement (Vector2d.Vector2d Quantity.Unitless Physics.Coordinates.WorldCoordinates) Time.Posix
+    | UpdateMovement (Vector3d.Vector3d Torque.NewtonMeters Physics.Coordinates.WorldCoordinates) Time.Posix
     | NoOpToBackend
 
 
@@ -162,7 +173,7 @@ type ToFrontend
             , frame : Frame3d.Frame3d Length.Meters Physics.Coordinates.WorldCoordinates { defines : Physics.Coordinates.BodyCoordinates }
             , velocity : Vector3d.Vector3d Speed.MetersPerSecond Physics.Coordinates.WorldCoordinates
             , angularVelocity : Vector3d.Vector3d AngularSpeed.RadiansPerSecond Physics.Coordinates.WorldCoordinates
-            , movement : Vector2d.Vector2d Quantity.Unitless Physics.Coordinates.WorldCoordinates
+            , movement : Vector3d.Vector3d Torque.NewtonMeters Physics.Coordinates.WorldCoordinates
             , time : Time.Posix
             }
         )
